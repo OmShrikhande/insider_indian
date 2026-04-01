@@ -3,6 +3,7 @@ import apiService from '../services/apiService';
 
 const useStockData = (symbol = 'AAPL', timeframe = '1h') => {
   const [data, setData] = useState([]);
+  const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -11,18 +12,21 @@ const useStockData = (symbol = 'AAPL', timeframe = '1h') => {
     setError(null);
 
     try {
-      const response = await apiService.getStockData(symbol, timeframe);
+      const [stockRes, newsRes] = await Promise.all([
+        apiService.getStockData(symbol, timeframe),
+        apiService.getLatestNews(symbol)
+      ]);
 
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to fetch stock data');
+      if (!stockRes.success) {
+        throw new Error(stockRes.error || 'Failed to fetch stock data');
       }
 
-      // Data is already transformed by backend to match lightweight-charts format
-      setData(response.data || []);
+      setData(stockRes.data || []);
+      setNews(newsRes.data || []);
     } catch (err) {
       setError(err.message);
       console.error('Error fetching stock data:', err);
-      setData([]); // Clear data on error
+      setData([]); 
     } finally {
       setLoading(false);
     }
@@ -32,7 +36,7 @@ const useStockData = (symbol = 'AAPL', timeframe = '1h') => {
     fetchData();
   }, [fetchData]);
 
-  return { data, loading, error, refetch: fetchData };
+  return { data, news, loading, error, refetch: fetchData };
 };
 
 export default useStockData;

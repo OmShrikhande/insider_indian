@@ -9,6 +9,8 @@ import IndicatorPanel from './IndicatorPanel';
 import PatternPanel from './PatternPanel';
 import { INDICATORS } from '../lib/indicatorRegistry';
 import { DEFAULT_PATTERNS } from '../lib/patternRegistry';
+import { detectSMC } from '../lib/smc';
+import './Dashboard.css'; // New CSS for premium styling
 
 const buildDefaultIndicators = () =>
   Object.fromEntries(INDICATORS.map(ind => [ind.id, ind.enabled]));
@@ -19,8 +21,15 @@ const Dashboard = () => {
   const [activeRightPanel, setActiveRightPanel] = useState('news');
   const [activeIndicators, setActiveIndicators] = useState(buildDefaultIndicators);
   const [activePatterns, setActivePatterns] = useState({ ...DEFAULT_PATTERNS });
+  const { data, news, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
+  const [smcData, setSmcData] = useState({ suggestions: [] });
 
-  const { data, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
+  useEffect(() => {
+    if (data.length > 0) {
+      const result = detectSMC(data);
+      setSmcData(result);
+    }
+  }, [data]);
 
   // Global "Type to search" shortcut
   useEffect(() => {
@@ -39,108 +48,115 @@ const Dashboard = () => {
   const activePatternCount  = Object.values(activePatterns).filter(Boolean).length;
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#000', color: '#848e9c' }}>
+    <div className="flex h-screen overflow-hidden elite-dashboard font-mono-elite">
 
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
       <Sidebar selectedSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol} />
 
       {/* ── Main Column ──────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, borderRight: '1px solid #1c2127' }}>
+      <div className="flex-1 flex flex-col min-w-0 border-r border-[#1c2127]">
 
-        {/* Top Bar — NO overflow:hidden so dropdowns can escape the bar */}
-        <div style={{ height: 56, flexShrink: 0, background: '#000', borderBottom: '1px solid #1c2127', display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px', position: 'relative', zIndex: 100 }}>
+        {/* Top Bar — Elite Transparent System */}
+        <div className="h-16 flex-shrink-0 bg-black/60 backdrop-blur-xl border-b border-[#1c2127]/50 flex items-center gap-6 px-6 relative z-[100]">
 
           {/* Symbol info */}
-          <div style={{ display: 'flex', flexDirection: 'column', marginRight: 4 }}>
-            <span style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: 18, color: '#d1d4dc', lineHeight: 1 }}>
-              {selectedSymbol}
-            </span>
-            <span style={{ fontSize: 9, color: '#39ff14', letterSpacing: '0.2em', fontWeight: 700 }}>
-              LIVE · {data.length.toLocaleString()} BARS
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2">
+              <span className="font-black text-xl text-[#00f2ff] tracking-tight">
+                {selectedSymbol}
+              </span>
+              <span className="text-[10px] bg-[#00f2ff]/10 text-[#00f2ff] px-1.5 py-0.5 rounded border border-[#00f2ff]/20">PRO</span>
+            </div>
+            <span className="text-[9px] text-[#39ff14] font-bold tracking-[0.3em] uppercase opacity-80">
+              Live_Uplink / {data.length} Bars
             </span>
           </div>
 
-          <div style={{ width: 1, height: 28, background: '#1c2127', flexShrink: 0 }} />
+          <div className="w-px h-8 bg-[#1c2127]/50" />
 
           <TimeframeSelector selectedTimeframe={selectedTimeframe} onTimeframeChange={setSelectedTimeframe} />
 
-          <div style={{ width: 1, height: 28, background: '#1c2127', flexShrink: 0 }} />
+          <div className="w-px h-8 bg-[#1c2127]/50" />
 
           {/* Indicator & Pattern toggle buttons */}
-          <IndicatorPanel activeIndicators={activeIndicators} onToggle={(id, val) => setActiveIndicators(prev => ({ ...prev, [id]: val }))} />
-          <PatternPanel activePatterns={activePatterns} onToggle={(id, val) => setActivePatterns(prev => ({ ...prev, [id]: val }))} />
+          <div className="flex items-center gap-2">
+            <IndicatorPanel activeIndicators={activeIndicators} onToggle={(id, val) => setActiveIndicators(prev => ({ ...prev, [id]: val }))} />
+            <PatternPanel activePatterns={activePatterns} onToggle={(id, val) => setActivePatterns(prev => ({ ...prev, [id]: val }))} />
+          </div>
 
           {/* Spacer */}
-          <div style={{ flex: 1 }} />
+          <div className="flex-1" />
 
-          {/* Stats */}
-          <div style={{ display: 'flex', gap: 16, fontSize: 10, fontFamily: 'monospace', color: '#5d606b', flexShrink: 0 }}>
-            {activeIndicatorCount > 0 && (
-              <span style={{ color: '#00f2ff' }}>{activeIndicatorCount} indicators</span>
-            )}
-            {activePatternCount > 0 && (
-              <span style={{ color: '#39ff14' }}>{activePatternCount} patterns</span>
-            )}
+          {/* Real-time Stats */}
+          <div className="flex items-center gap-6 text-[10px] font-bold">
+            <div className="flex flex-col items-end">
+              <span className="text-[#5d606b] text-[8px] uppercase">Active_Layer</span>
+              <span className="text-[#00f2ff]">{activeIndicatorCount} IND / {activePatternCount} PTRN</span>
+            </div>
             {data.length > 0 && (
-              <span style={{ color: '#d1d4dc', fontWeight: 700 }}>
-                {data[data.length - 1]?.close?.toFixed(2)}
-              </span>
+              <div className="flex flex-col items-end">
+                <span className="text-[#5d606b] text-[8px] uppercase">Market_Price</span>
+                <span className="text-white text-lg tracking-tighter">
+                  {data[data.length - 1]?.close?.toFixed(2)}
+                </span>
+              </div>
             )}
           </div>
 
-          <div style={{ width: 1, height: 28, background: '#1c2127', flexShrink: 0 }} />
+          <div className="w-px h-8 bg-[#1c2127]/50" />
 
-          <div style={{ width: 28, height: 28, border: '1px solid #1c2127', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#5d606b', fontSize: 14, flexShrink: 0 }}>
-            ★
+          <div className="w-10 h-10 elite-button rounded-xl flex items-center justify-center cursor-pointer hover:shadow-[0_0_15px_#00f2ff33]">
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
           </div>
         </div>
 
-        {/* Chart Area — CRITICAL: use flex:1 with minHeight:0 to prevent overflow */}
-        <div style={{ flex: 1, minHeight: 0, position: 'relative', background: '#000' }}>
+        {/* Chart Area */}
+        <div className="flex-1 min-height-0 relative bg-black">
 
-          {/* Loading */}
+          {/* Loading System */}
           {loading && (
-            <div style={{ position: 'absolute', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.85)' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                <div style={{ width: 40, height: 40, border: '2px solid #00f2ff', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                <span style={{ fontSize: 9, letterSpacing: '0.3em', color: '#00f2ff', fontFamily: 'monospace', fontWeight: 700 }}>
-                  FETCHING {selectedSymbol}…
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-12 h-12 border-2 border-[#00f2ff] border-t-transparent rounded-full animate-spin shadow-[0_0_20px_#00f2ff33]" />
+                <span className="text-[10px] tracking-[0.5em] text-[#00f2ff] font-bold animate-pulse">
+                  SYNCING_ASSETS_
                 </span>
               </div>
             </div>
           )}
 
-          {/* Error */}
+          {/* Error Handling */}
           {error && (
-            <div style={{ position: 'absolute', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ background: '#060000', border: '1px solid rgba(255,0,60,0.5)', padding: 24, borderRadius: 8, maxWidth: 360 }}>
-                <div style={{ fontSize: 10, color: '#ff003c', fontWeight: 700, letterSpacing: '0.2em', marginBottom: 8 }}>
-                  ● LINK ERROR
+            <div className="absolute inset-0 z-50 flex items-center justify-center p-6">
+              <div className="elite-panel border-[#ff003c55] p-8 max-w-sm text-center">
+                <div className="text-[10px] color-[#ff003c] font-black tracking-[0.2em] mb-4">
+                  CRITICAL_CONNECTION_FAILURE
                 </div>
-                <div style={{ fontSize: 12, color: '#848e9c', fontFamily: 'monospace' }}>{error}</div>
+                <div className="text-sm text-[#848e9c] mb-6 leading-relaxed uppercase">{error}</div>
                 <button
                   onClick={() => window.location.reload()}
-                  style={{ marginTop: 16, width: '100%', padding: '8px 0', fontSize: 10, fontWeight: 700, color: '#ff003c', background: 'transparent', border: '1px solid rgba(255,0,60,0.3)', borderRadius: 4, cursor: 'pointer', letterSpacing: '0.15em' }}
+                  className="w-full py-4 elite-button text-[#ff003c] border-[#ff003c33] rounded-lg tracking-widest text-[10px]"
                 >
-                  RECONNECT
+                  REBOOT_SYSTEM_
                 </button>
               </div>
             </div>
           )}
 
-          {/* No data */}
+          {/* No data state */}
           {!loading && !error && data.length === 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-              <span style={{ color: '#1c2127', fontFamily: 'monospace', fontSize: 13, letterSpacing: '0.25em' }}>
-                [ NO DATA — {selectedSymbol} {selectedTimeframe} ]
+            <div className="flex items-center justify-center h-full">
+              <span className="text-[#1c2127] text-sm tracking-[0.4em] font-black italic">
+                [ NO_OHLCV_INTEL_CAPTURED ]
               </span>
             </div>
           )}
 
-          {/* Chart */}
+          {/* The Chart */}
           {!loading && !error && data.length > 0 && (
             <CandlestickChart
               data={data}
+              news={news}
               symbol={selectedSymbol}
               activeIndicators={activeIndicators}
               activePatterns={activePatterns}
@@ -148,46 +164,50 @@ const Dashboard = () => {
           )}
         </div>
 
-        {/* Status bar */}
-        <div style={{ height: 28, flexShrink: 0, background: '#000', borderTop: '1px solid #1c2127', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', fontSize: 9, fontFamily: 'monospace', color: '#5d606b' }}>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-            <span style={{ color: '#39ff14', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#39ff14', display: 'inline-block', animation: 'pulse 2s infinite' }} />
-              UPLINK: ACTIVE
+        {/* Terminal Status Bar */}
+        <div className="h-8 flex-shrink-0 bg-black border-t border-[#1c2127]/50 flex items-center justify-between px-6 text-[8px] font-mono tracking-widest text-[#333]">
+          <div className="flex gap-6 items-center">
+            <span className="text-[#39ff14] flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#39ff14] animate-pulse" />
+              STATUS: NOMINAL
             </span>
-            <span>AES-256</span>
-            <span>ClickHouse_P99</span>
+            <span>ENCRYPTION: SH-512</span>
+            <span>BUFFER: {Math.floor(data.length / 10)}MB</span>
           </div>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-            <span>{new Date().toISOString().replace('T', ' ').slice(0, 19)} UTC</span>
-            <span style={{ color: '#00f2ff' }}>ProTrader v7.0</span>
+          <div className="flex gap-6 items-center">
+            <span className="text-[#5d606b]">{new Date().toISOString().replace('T', '_').slice(0, 19)}</span>
+            <span className="text-[#00f2ff] font-bold bg-[#00f2ff]/5 px-2 py-0.5 rounded">ELITE_EDITION_V7.2</span>
           </div>
         </div>
       </div>
 
+
       {/* ── Right Intelligence Panel ──────────────────────────────────────── */}
-      <div style={{ width: 288, flexShrink: 0, display: 'flex', flexDirection: 'column', background: '#000', borderLeft: '1px solid #1c2127' }}>
-        <div style={{ display: 'flex', borderBottom: '1px solid #1c2127', flexShrink: 0 }}>
+      <div className="w-72 flex-shrink-0 flex flex-col bg-black border-l border-[#1c2127]">
+        <div className="flex border-b border-[#1c2127] flex-shrink-0 bg-[#050505]">
           {['news', 'trades'].map(panel => (
             <button
               key={panel}
               onClick={() => setActiveRightPanel(panel)}
-              style={{
-                flex: 1, padding: '12px 0', fontSize: 9, fontWeight: 700, letterSpacing: '0.2em',
-                textTransform: 'uppercase', background: 'transparent', border: 'none', cursor: 'pointer',
-                borderBottom: activeRightPanel === panel ? '2px solid #00f2ff' : '2px solid transparent',
-                color: activeRightPanel === panel ? '#00f2ff' : '#5d606b',
-                transition: 'all 0.2s',
-              }}
+              className={`flex-1 py-4 text-[9px] font-black uppercase tracking-[0.2em] transition-all cursor-pointer ${
+                activeRightPanel === panel 
+                  ? 'text-[#00f2ff] border-b-2 border-[#00f2ff] bg-[#00f2ff]/5' 
+                  : 'text-[#5d606b] border-b-2 border-transparent hover:text-[#848e9c]'
+              }`}
             >
-              {panel === 'news' ? 'Intelligence' : 'Futuristic'}
+              {panel === 'news' ? 'Market_Intel' : 'SMC_Alpha'}
             </button>
           ))}
         </div>
-        <div style={{ flex: 1, overflow: 'hidden' }}>
-          {activeRightPanel === 'news' ? <NewsList /> : <TradeFeed />}
+        <div className="flex-1 overflow-hidden">
+          {activeRightPanel === 'news' ? (
+            <NewsList /> 
+          ) : (
+            <TradeFeed trades={smcData.suggestions} />
+          )}
         </div>
       </div>
+
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }

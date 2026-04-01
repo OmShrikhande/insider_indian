@@ -9,16 +9,26 @@ import {
 } from 'lightweight-charts';
 import * as Calcs from '../lib/indicators';
 import { scanPatterns } from '../lib/patterns';
+import { detectSMC } from '../lib/smc';
+import { calculateVolumeProfile } from '../lib/volumeProfile';
 
-const CandlestickChart = ({ data, symbol, activeIndicators, activePatterns }) => {
+const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns }) => {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const candleRef = useRef(null);
   const seriesMarkersRef = useRef(null); // v5 markers plugin instance
   const seriesMapRef = useRef({});
+  const prevSymbolRef = useRef(symbol);
   const [tooltipData, setTooltipData] = useState(null);
+  const [newsMarkers, setNewsMarkers] = useState([]);
   const [drawings, setDrawings] = useState([]);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [rulerState, setRulerState] = useState(null); // { startPoint: { time, price }, currentPoint: { time, price } }
+  const [isRulerMode, setIsRulerMode] = useState(false);
+  const [activeDrawingType, setActiveDrawingType] = useState(null); // 'hline' | 'trend' | 'box'
+  const [currentLine, setCurrentLine] = useState(null); // { start: { time, price }, end: { time, price } }
+  const [currentBox, setCurrentBox] = useState(null); // { start: { time, price }, end: { time, price } }
+  const [vpProfile, setVpProfile] = useState(null);
 
   // ─── Init chart once ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -271,61 +281,308 @@ const CandlestickChart = ({ data, symbol, activeIndicators, activePatterns }) =>
         addHistogram('er_b', er.map(d => ({ time: d.time, value: d.bullPower, color: 'rgba(57,255,20,0.4)' })), '#4caf50', sc);
         addHistogram('er_r', er.map(d => ({ time: d.time, value: d.bearPower, color: 'rgba(255,0,60,0.4)' })), '#ef5350', sc);
       }
-
     } catch (err) {
       console.error('Indicator render error:', err);
     }
 
-    // ── Pattern Markers (lightweight-charts v5 API) ───────────────────────
-    if (activePatterns && candleRef.current) {
+    // ── Pattern & News & SMC Markers (lightweight-charts v5 API) ──────────
+    if (candleRef.current) {
       try {
-        const markers = scanPatterns(data, activePatterns);
-        // createSeriesMarkers returns a plugin that manages markers on a series
-        if (seriesMarkersRef.current) {
-          // Update existing markers plugin
-          seriesMarkersRef.current.setMarkers(markers);
-        } else {
-          // Create new markers plugin for this series
-          seriesMarkersRef.current = createSeriesMarkers(candleRef.current, markers);
+        const patternMarkers = activePatterns ? scanPatterns(data, activePatterns) : [];
+        
+        // SMC Detection
+        const smc = detectSMC(data);
+        const smcMarkers = [];
+        if (activeIndicators?.smc) {
+          smc.bos.forEach(b => smcMarkers.push({ time: b.time, position: 'aboveBar', shape: 'arrowDown', color: b.color, text: b.type }));
+          smc.choch.forEach(c => smcMarkers.push({ time: c.time, position: 'aboveBar', shape: 'arrowDown', color: c.color, text: c.type }));
         }
+
+        // Convert news to markers (limit to last 5)
+        const newsMarkersList = (news || []).slice(0, 5).map(item => ({
+          time: Math.floor(new Date(item.timestamp).getTime() / 1000),
+          position: 'aboveBar',
+          shape: 'circle',
+          color: item.sentiment === 'bullish' ? '#39ff14' : item.sentiment === 'bearish' ? '#ff003c' : '#00f2ff',
+          text: 'NEWS',
+          size: 2,
+        }));
+
+        const allMarkers = [...patternMarkers, ...newsMarkersList, ...smcMarkers].sort((a, b) => a.time - b.time);
+
+        if (seriesMarkersRef.current) {
+          seriesMarkersRef.current.setMarkers(allMarkers);
+        } else {
+          seriesMarkersRef.current = createSeriesMarkers(candleRef.current, allMarkers);
+        }
+
+        // Volume Profile Overlay
+        if (activeIndicators?.vp) {
+          const vp = calculateVolumeProfile(data);
+          setVpProfile(vp);
+        } else {
+          setVpProfile(null);
+        }
+
       } catch (e) {
-        console.warn('Pattern markers error:', e.message);
+        console.warn('Markers rendering error:', e.message);
       }
     }
 
-    chart.timeScale().fitContent();
-  }, [data, activeIndicators, activePatterns]);
+    // Only fit content when symbol changes or first data load
+    if (prevSymbolRef.current !== symbol || !seriesMapRef.current._initialFitDone) {
+      chart.timeScale().fitContent();
+      prevSymbolRef.current = symbol;
+      seriesMapRef.current._initialFitDone = true;
+    }
+  }, [data, news, activeIndicators, activePatterns, symbol]);
 
-  const addDrawing = useCallback((e) => {
-    if (!isDrawingMode || !chartRef.current) return;
-    const price = chartRef.current.priceScale('right').coordinateToPrice(e.nativeEvent.offsetY);
-    if (price) { setDrawings(prev => [...prev, { price }]); setIsDrawingMode(false); }
-  }, [isDrawingMode]);
+  const handleChartClick = useCallback((e) => {
+    if (!chartRef.current || !candleRef.current) return;
+    const price = candleRef.current.coordinateToPrice(e.nativeEvent.offsetY);
+    const time = chartRef.current.timeScale().coordinateToTime(e.nativeEvent.offsetX);
+
+    if (isRulerMode) {
+      if (!rulerState) {
+        setRulerState({ start: { time, price }, end: { time, price } });
+      } else {
+        setRulerState(null);
+        setIsRulerMode(false);
+      }
+      return;
+    }
+
+    if (activeDrawingType === 'hline') {
+      setDrawings(prev => [...prev, { type: 'hline', price }]);
+      setActiveDrawingType(null);
+    } else if (activeDrawingType === 'trend') {
+      if (!currentLine) {
+        setCurrentLine({ start: { time, price }, end: { time, price } });
+      } else {
+        setDrawings(prev => [...prev, { type: 'trend', ...currentLine, end: { time, price } }]);
+        setCurrentLine(null);
+        setActiveDrawingType(null);
+      }
+    } else if (activeDrawingType === 'box') {
+      if (!currentBox) {
+        setCurrentBox({ start: { time, price }, end: { time, price } });
+      } else {
+        setDrawings(prev => [...prev, { type: 'box', ...currentBox, end: { time, price } }]);
+        setCurrentBox(null);
+        setActiveDrawingType(null);
+      }
+    }
+  }, [activeDrawingType, isRulerMode, rulerState, currentLine, currentBox]);
+
+  const handleMouseMove = useCallback((e) => {
+    if (!chartRef.current || !candleRef.current) return;
+    const price = candleRef.current.coordinateToPrice(e.nativeEvent.offsetY);
+    const time = chartRef.current.timeScale().coordinateToTime(e.nativeEvent.offsetX);
+
+    if (isRulerMode && rulerState) {
+      setRulerState(prev => ({ ...prev, end: { time, price } }));
+    }
+    if (activeDrawingType === 'trend' && currentLine) {
+      setCurrentLine(prev => ({ ...prev, end: { time, price } }));
+    }
+    if (activeDrawingType === 'box' && currentBox) {
+      setCurrentBox(prev => ({ ...prev, end: { time, price } }));
+    }
+  }, [isRulerMode, rulerState, activeDrawingType, currentLine, currentBox]);
 
   return (
-    <div className="relative w-full h-full bg-[#000000]" onClick={addDrawing}>
+    <div 
+      className="relative w-full h-full bg-[#000000]" 
+      onClick={handleChartClick}
+      onMouseMove={handleMouseMove}
+    >
 
       {/* Toolbar */}
-      <div className="absolute top-2 left-2 z-20 flex gap-1.5">
+      <div className="absolute top-2 left-2 z-20 flex flex-col gap-1.5 p-1 bg-[#050505]/80 backdrop-blur-md rounded border border-[#1c2127]">
         <button
-          onClick={e => { e.stopPropagation(); setIsDrawingMode(v => !v); }}
-          className={`px-2 py-1 text-[9px] uppercase font-bold tracking-widest rounded border transition-all ${
-            isDrawingMode
-              ? 'bg-[#00f2ff] text-[#000000] border-[#00f2ff]'
-              : 'bg-[#050505]/90 text-[#848e9c] border-[#1c2127] hover:border-[#00f2ff]'
+          onClick={e => { e.stopPropagation(); setActiveDrawingType('hline'); setIsRulerMode(false); }}
+          className={`w-8 h-8 flex items-center justify-center rounded transition-all ${
+            activeDrawingType === 'hline' ? 'bg-[#00f2ff] text-[#000]' : 'text-[#848e9c] hover:bg-[#1c2127]'
           }`}
+          title="Horizontal Line"
         >
-          {isDrawingMode ? '[ CLICK ON CHART ]' : '⊕ H-Line'}
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14"/></svg>
         </button>
-        {drawings.length > 0 && (
-          <button
-            onClick={e => { e.stopPropagation(); setDrawings([]); }}
-            className="px-2 py-1 text-[9px] uppercase font-bold tracking-widest bg-[#050505]/90 text-[#848e9c] hover:text-[#ff003c] rounded border border-[#1c2127] transition-all"
-          >
-            Clear ({drawings.length})
-          </button>
-        )}
+        <button
+          onClick={e => { e.stopPropagation(); setActiveDrawingType('trend'); setIsRulerMode(false); }}
+          className={`w-8 h-8 flex items-center justify-center rounded transition-all ${
+            activeDrawingType === 'trend' ? 'bg-[#00f2ff] text-[#000]' : 'text-[#848e9c] hover:bg-[#1c2127]'
+          }`}
+          title="Trendline"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 4L3 20"/></svg>
+        </button>
+        <button
+          onClick={e => { e.stopPropagation(); setActiveDrawingType('box'); setIsRulerMode(false); }}
+          className={`w-8 h-8 flex items-center justify-center rounded transition-all ${
+            activeDrawingType === 'box' ? 'bg-[#00f2ff] text-[#000]' : 'text-[#848e9c] hover:bg-[#1c2127]'
+          }`}
+          title="Order Block Box"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        </button>
+        <button
+          onClick={e => { e.stopPropagation(); setIsRulerMode(v => !v); setActiveDrawingType(null); }}
+          className={`w-8 h-8 flex items-center justify-center rounded transition-all ${
+            isRulerMode ? 'bg-[#39ff14] text-[#000]' : 'text-[#848e9c] hover:bg-[#1c2127]'
+          }`}
+          title="Ruler tool"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 4v16M5 4v16M5 12h14M8 4h0M12 4h0M16 4h0M8 20h0M12 20h0M16 20h0"/></svg>
+        </button>
+        <div className="w-full h-px bg-[#1c2127] my-0.5" />
+        <button
+          onClick={e => { e.stopPropagation(); setDrawings([]); }}
+          className="w-8 h-8 flex items-center justify-center text-[#848e9c] hover:text-[#ff003c] rounded transition-all"
+          title="Clear all"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 7l-7 7-7-7"/></svg>
+        </button>
+        <div className="w-full h-px bg-[#1c2127] my-0.5" />
+        <button
+          onClick={e => { 
+            e.stopPropagation(); 
+            const ts = chartRef.current?.timeScale();
+            if (ts) {
+              const range = ts.getVisibleLogicalRange();
+              if (range) {
+                const width = range.to - range.from;
+                ts.setVisibleLogicalRange({ from: range.from + width * 0.1, to: range.to - width * 0.1 });
+              }
+            }
+          }}
+          className="w-8 h-8 flex items-center justify-center text-[#848e9c] hover:bg-[#1c2127] rounded"
+          title="Zoom In"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button
+          onClick={e => { 
+            e.stopPropagation(); 
+            const ts = chartRef.current?.timeScale();
+            if (ts) {
+              const range = ts.getVisibleLogicalRange();
+              if (range) {
+                const width = range.to - range.from;
+                ts.setVisibleLogicalRange({ from: range.from - width * 0.1, to: range.to + width * 0.1 });
+              }
+            }
+          }}
+          className="w-8 h-8 flex items-center justify-center text-[#848e9c] hover:bg-[#1c2127] rounded"
+          title="Zoom Out"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14"/></svg>
+        </button>
       </div>
+
+      {/* Shapes & VP Overlay (SVG) */}
+      <svg className="absolute inset-0 pointer-events-none z-10 w-full h-full">
+        {/* Volume Profile Bars */}
+        {vpProfile && chartRef.current && (
+           <g opacity="0.4">
+              {vpProfile.profile.map((p, i) => {
+                const y = chartRef.current.priceScale('right').priceToCoordinate(p.value);
+                const barWidth = (p.volume / vpProfile.maxVolume) * 120; // Max 120px width
+                return (
+                  <rect 
+                    key={i} 
+                    x={containerRef.current.clientWidth - barWidth} 
+                    y={y - 2} 
+                    width={barWidth} 
+                    height={4} 
+                    fill={p.value === vpProfile.poc ? '#39ff14' : '#00f2ff'} 
+                  />
+                );
+              })}
+           </g>
+        )}
+
+        {drawings.map((draw, idx) => (
+           <g key={idx}>
+              {draw.type === 'trend' && (
+                <line 
+                  x1={chartRef.current?.timeScale().timeToCoordinate(draw.start.time)}
+                  y1={chartRef.current?.priceScale('right').priceToCoordinate(draw.start.price)}
+                  x2={chartRef.current?.timeScale().timeToCoordinate(draw.end.time)}
+                  y2={chartRef.current?.priceScale('right').priceToCoordinate(draw.end.price)}
+                  stroke="rgba(0,242,255,0.7)" strokeWidth="1.5" 
+                />
+              )}
+              {draw.type === 'box' && (
+                <rect 
+                  x={Math.min(chartRef.current?.timeScale().timeToCoordinate(draw.start.time), chartRef.current?.timeScale().timeToCoordinate(draw.end.time))}
+                  y={Math.min(chartRef.current?.priceScale('right').priceToCoordinate(draw.start.price), chartRef.current?.priceScale('right').priceToCoordinate(draw.end.price))}
+                  width={Math.abs(chartRef.current?.timeScale().timeToCoordinate(draw.start.time) - chartRef.current?.timeScale().timeToCoordinate(draw.end.time))}
+                  height={Math.abs(chartRef.current?.priceScale('right').priceToCoordinate(draw.start.price) - chartRef.current?.priceScale('right').priceToCoordinate(draw.end.price))}
+                  fill="rgba(0,242,255,0.15)" stroke="rgba(0,242,255,0.3)" 
+                />
+              )}
+              {draw.type === 'hline' && (
+                <line 
+                  x1="0" x2="100%"
+                  y1={chartRef.current?.priceScale('right').priceToCoordinate(draw.price)}
+                  y2={chartRef.current?.priceScale('right').priceToCoordinate(draw.price)}
+                  stroke="rgba(0,242,255,0.4)" strokeWidth="1" strokeDasharray="2 2"
+                />
+              )}
+           </g>
+        ))}
+        {/* Partial previews */}
+        {currentLine && (
+          <line 
+            x1={chartRef.current?.timeScale().timeToCoordinate(currentLine.start.time)}
+            y1={chartRef.current?.priceScale('right').priceToCoordinate(currentLine.start.price)}
+            x2={chartRef.current?.timeScale().timeToCoordinate(currentLine.end.time)}
+            y2={chartRef.current?.priceScale('right').priceToCoordinate(currentLine.end.price)}
+            stroke="rgba(0,242,255,0.5)" strokeWidth="1.5" strokeDasharray="4 4"
+          />
+        )}
+        {currentBox && (
+          <rect 
+            x={Math.min(chartRef.current?.timeScale().timeToCoordinate(currentBox.start.time), chartRef.current?.timeScale().timeToCoordinate(currentBox.end.time))}
+            y={Math.min(chartRef.current?.priceScale('right').priceToCoordinate(currentBox.start.price), chartRef.current?.priceScale('right').priceToCoordinate(currentBox.end.price))}
+            width={Math.abs(chartRef.current?.timeScale().timeToCoordinate(currentBox.start.time) - chartRef.current?.timeScale().timeToCoordinate(currentBox.end.time))}
+            height={Math.abs(chartRef.current?.priceScale('right').priceToCoordinate(currentBox.start.price) - chartRef.current?.priceScale('right').priceToCoordinate(currentBox.end.price))}
+            fill="rgba(0,242,255,0.1)" stroke="rgba(0,242,255,0.2)" strokeDasharray="4 4"
+          />
+        )}
+      </svg>
+
+      {/* Ruler Overlay */}
+      {isRulerMode && rulerState && (
+        <div className="absolute inset-0 pointer-events-none z-30">
+           <svg className="w-full h-full">
+              <line 
+                x1={chartRef.current?.timeScale().timeToCoordinate(rulerState.start.time)}
+                y1={chartRef.current?.priceScale('right').priceToCoordinate(rulerState.start.price)}
+                x2={chartRef.current?.timeScale().timeToCoordinate(rulerState.end.time)}
+                y2={chartRef.current?.priceScale('right').priceToCoordinate(rulerState.end.price)}
+                stroke="#39ff14"
+                strokeWidth="1.5"
+                strokeDasharray="4 4"
+              />
+           </svg>
+           {/* Delta Label */}
+           {chartRef.current && (
+             <div 
+               style={{ 
+                 position: 'absolute', 
+                 left: chartRef.current.timeScale().timeToCoordinate(rulerState.end.time) + 10,
+                 top: chartRef.current.priceScale('right').priceToCoordinate(rulerState.end.price) - 10,
+                 background: '#39ff14', color: '#000', padding: '2px 6px', borderRadius: 4,
+                 fontSize: 10, fontWeight: 700, fontFamily: 'monospace'
+               }}
+             >
+               {((rulerState.end.price - rulerState.start.price)/rulerState.start.price * 100).toFixed(2)}% | {(rulerState.end.price - rulerState.start.price).toFixed(2)} pts
+             </div>
+           )}
+        </div>
+      )}
 
       {/* OHLC Tooltip */}
       {tooltipData && (

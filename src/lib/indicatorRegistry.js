@@ -79,4 +79,6 @@ export const INDICATORS = [
   { id: 'coppock', name: 'Coppock Curve', category: 'Advanced', pane: 'sub', type: 'line', color: '#00b0ff', params: {}, enabled: false },
   { id: 'kst',     name: 'KST',      category: 'Advanced', pane: 'sub', type: 'line',      color: '#00e5ff', params: {}, enabled: false },
   { id: 'elderray', name: 'Elder Ray', category: 'Advanced', pane: 'sub', type: 'multi',   color: '#1de9b6', params: { period: 13 }, enabled: false },
+  { id: 'smc',      name: 'Smart Money Concepts', category: 'Advanced', pane: 'price', type: 'markers', color: '#00f2ff', params: {}, enabled: true },
+  { id: 'vp',       name: 'Volume Profile', category: 'Advanced', pane: 'price', type: 'histogram', color: 'rgba(0, 242, 255, 0.2)', params: { bins: 50 }, enabled: false },
 ];

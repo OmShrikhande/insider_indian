@@ -1,0 +1,96 @@
+/* ProTrader Elite - Premium Aesthetic System */
+
+:root {
+  --elite-bg: #000000;
+  --elite-glass: rgba(10, 10, 10, 0.75);
+  --elite-border: rgba(28, 33, 39, 0.8);
+  --elite-accent: #00f2ff;
+  --elite-success: #39ff14;
+  --elite-danger: #ff003c;
+  --elite-text: #d1d4dc;
+  --elite-text-muted: #848e9c;
+  --elite-neon-glow: 0 0 15px rgba(0, 242, 255, 0.3);
+}
+
+.elite-dashboard {
+  background: var(--elite-bg);
+  color: var(--elite-text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+.elite-panel {
+  background: var(--elite-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--elite-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+.elite-button {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--elite-border);
+  color: var(--elite-text-muted);
+  font-weight: 600;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.elite-button:hover {
+  border-color: var(--elite-accent);
+  color: var(--elite-accent);
+  box-shadow: var(--elite-neon-glow);
+}
+
+.elite-button.active {
+  background: var(--elite-accent);
+  color: #000;
+  border-color: var(--elite-accent);
+}
+
+.elite-sidebar-item {
+  border-left: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.elite-sidebar-item:hover {
+  background: rgba(0, 242, 255, 0.05);
+  border-left-color: var(--elite-accent);
+}
+
+.elite-card {
+  background: linear-gradient(135deg, rgba(20, 20, 20, 0.8) 0%, rgba(10, 10, 10, 0.8) 100%);
+  border: 1px solid var(--elite-border);
+  transition: transform 0.2s, border-color 0.2s;
+}
+
+.elite-card:hover {
+  border-color: var(--elite-accent);
+  transform: translateY(-2px);
+}
+
+/* Custom scrollbar for premium feel */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--elite-border);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--elite-accent);
+}
+
+/* Modern typography enhancements */
+h1, h2, h3 {
+  letter-spacing: -0.02em;
+}
+
+.font-mono-elite {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}

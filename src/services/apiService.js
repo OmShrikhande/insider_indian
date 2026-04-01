@@ -42,9 +42,9 @@ class ApiService {
     return this.request(`/api/stocks/search/all?q=${encodeURIComponent(query)}`);
   }
 
-  // Get latest news
-  async getLatestNews() {
-    return this.request('/api/stocks/news/latest');
+  // Get latest news from ClickHouse DB
+  async getLatestNews(search = '', sort = 'desc') {
+    return this.request(`/api/stocks/news/latest?q=${encodeURIComponent(search)}&sort=${sort}`);
   }
 
   // Get futuristic trades

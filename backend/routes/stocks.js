@@ -150,7 +150,8 @@ router.get('/search/all', async (req, res) => {
  */
 router.get('/news/latest', async (req, res) => {
   try {
-    const news = await newsService.getLatestNews();
+    const { q = '', sort = 'desc' } = req.query;
+    const news = await newsService.getNewsFromDB(q, sort);
     res.json({ success: true, data: news });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
