@@ -1,6 +1,7 @@
 const express = require('express');
 const fnoService = require('../services/fnoService');
 const indexOhlcService = require('../services/indexOhlcService');
+const fnoOrbStrategyService = require('../services/fnoOrbStrategyService');
 const { protect, requireAdmin } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -149,6 +150,22 @@ router.get('/ohlcv', async (req, res) => {
   } catch (error) {
     console.error('FNO OHLCV fetch error:', error.message);
     res.status(500).json({ success: false, error: 'Failed to fetch FNO OHLCV data' });
+  }
+});
+
+router.get('/orb-signal', async (req, res) => {
+  try {
+    const { underlying = 'NIFTY', expiry = '' } = req.query;
+    const result = await fnoOrbStrategyService.analyze({
+      underlying: String(underlying || 'NIFTY'),
+      expiry: String(expiry || ''),
+    });
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 

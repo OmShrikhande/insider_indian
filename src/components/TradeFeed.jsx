@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import apiService from '../services/apiService';
 
-const TradeFeed = ({ trades = [] }) => {
+const TradeFeed = ({ trades = [], isFnoMode = false, fnoStrategySignal = null }) => {
   const [dbTrades, setDbTrades] = useState([]);
   const [toast, setToast] = useState('');
 
@@ -43,9 +43,31 @@ const TradeFeed = ({ trades = [] }) => {
     isDb: true,
   })), [dbTrades]);
 
-  const mergedTrades = [...suggestedTrades, ...localTrades];
+  const mergedTrades = isFnoMode ? [...localTrades] : [...suggestedTrades, ...localTrades];
   const visibleTrades = mergedTrades.slice(0, 10);
-  if (visibleTrades.length === 0) return <div className="p-4 text-xs text-[#5d606b] font-mono">Scanning live vectors for SMC setups...</div>;
+  if (visibleTrades.length === 0) {
+    if (isFnoMode) {
+      return (
+        <div className="p-4 space-y-3">
+          <div className="text-xs text-[#5d606b] font-mono">F&O ORB strategy status</div>
+          <div className="border border-[#1c2127] rounded p-3 bg-[#050505] text-[11px] text-[#d1d4dc]">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[#00f2ff] font-bold tracking-widest uppercase text-[9px]">ORB_ENGINE</span>
+              <span className={`text-[9px] font-black px-2 py-0.5 rounded ${
+                fnoStrategySignal?.trade_allowed ? 'bg-[#39ff14]/10 text-[#39ff14]' : 'bg-[#ff4d4d]/10 text-[#ff4d4d]'
+              }`}>
+                {fnoStrategySignal?.trade_allowed ? 'TRADE ALLOWED' : 'NO TRADE'}
+              </span>
+            </div>
+            <div className="text-[#848e9c]">
+              {fnoStrategySignal?.message || fnoStrategySignal?.day_classification?.reason || 'No valid breakout detected in trading window'}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return <div className="p-4 text-xs text-[#5d606b] font-mono">Scanning live vectors for SMC setups...</div>;
+  }
 
   const focusTradeOnChart = (trade) => {
     window.dispatchEvent(new CustomEvent('roxey-focus-trade', { detail: trade }));
@@ -81,7 +103,9 @@ const TradeFeed = ({ trades = [] }) => {
             <div className="flex justify-between items-start mb-3">
               <div>
                 <span className="font-black text-sm text-[#d1d4dc] tracking-tighter">{trade.symbol}</span>
-                <div className="text-[8px] text-[#5d606b] uppercase font-bold tracking-widest mt-0.5">SMC_ALGO_VECTOR</div>
+                <div className="text-[8px] text-[#5d606b] uppercase font-bold tracking-widest mt-0.5">
+                  {trade.source ? String(trade.source) : 'SMC_ALGO_VECTOR'}
+                </div>
               </div>
               <div className="flex flex-col items-end gap-1">
                 <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${

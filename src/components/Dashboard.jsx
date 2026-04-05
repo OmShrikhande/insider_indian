@@ -65,6 +65,7 @@ const Dashboard = () => {
   const [fnoIndexSpotLoading, setFnoIndexSpotLoading] = useState(false);
   const [fnoModeHydrated, setFnoModeHydrated] = useState(false);
   const [focusedTrade, setFocusedTrade] = useState(null);
+  const [fnoOrbSignal, setFnoOrbSignal] = useState(null);
 
   // --- Specialized Hooks ---
   const { data, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
@@ -109,6 +110,26 @@ const Dashboard = () => {
   }, [data, selectedSymbol]);
 
   useEffect(() => {
+    let cancelled = false;
+    const loadOrbSignal = async () => {
+      if (!fnoLogic.isFnoMode) {
+        setFnoOrbSignal(null);
+        return;
+      }
+      try {
+        const res = await apiService.getFnoOrbSignal(selectedSymbol, fnoLogic.fnoExpiry);
+        if (!cancelled) setFnoOrbSignal(res || null);
+      } catch {
+        if (!cancelled) setFnoOrbSignal(null);
+      }
+    };
+    loadOrbSignal();
+    return () => {
+      cancelled = true;
+    };
+  }, [fnoLogic.isFnoMode, selectedSymbol, fnoLogic.fnoExpiry]);
+
+  useEffect(() => {
     const loadChainRows = async () => {
       if (!fnoLogic.isFnoMode || !fnoLogic.fnoExpiry) {
         setChainRows([]);
@@ -139,8 +160,13 @@ const Dashboard = () => {
     [chainRows, selectedSymbol, fnoLogic.fnoExpiry]
   );
   const allTrades = useMemo(
-    () => [...chainTrades, ...(smcData.suggestions || [])],
-    [chainTrades, smcData.suggestions]
+    () => {
+      if (fnoLogic.isFnoMode) {
+        return fnoOrbSignal?.local_trade ? [fnoOrbSignal.local_trade] : [];
+      }
+      return [...chainTrades, ...(smcData.suggestions || [])];
+    },
+    [fnoLogic.isFnoMode, fnoOrbSignal, chainTrades, smcData.suggestions]
   );
 
   const indexUnderlyingForChart = useMemo(() => {
@@ -411,7 +437,13 @@ const Dashboard = () => {
         {!isRightSidebarCollapsed && (
           <div className="flex-1 overflow-hidden">
             {activeRightPanel === 'news' && <NewsList selectedSymbol={selectedSymbol} />}
-            {activeRightPanel === 'trades' && <TradeFeed trades={allTrades} />}
+            {activeRightPanel === 'trades' && (
+              <TradeFeed
+                trades={allTrades}
+                isFnoMode={fnoLogic.isFnoMode}
+                fnoStrategySignal={fnoOrbSignal}
+              />
+            )}
             {activeRightPanel === 'research' && <ResearchPanel selectedSymbol={selectedSymbol} />}
             {activeRightPanel === 'alpha' && (
               <AlphaChatPanel

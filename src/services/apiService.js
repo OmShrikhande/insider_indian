@@ -162,6 +162,14 @@ class ApiService {
     return this.request(`/api/fno/ohlcv?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(expiry)}&strike=${encodeURIComponent(strike)}&timeframe=${encodeURIComponent(timeframe)}`);
   }
 
+  async getFnoOrbSignal(underlying = 'NIFTY', expiry = '') {
+    const q = new URLSearchParams({
+      underlying: String(underlying || 'NIFTY').toUpperCase(),
+      expiry: String(expiry || ''),
+    });
+    return this.request(`/api/fno/orb-signal?${q.toString()}`);
+  }
+
   async getFnoSuggestedTrades(limit = 100) {
     return this.request(`/api/fno/trades?limit=${encodeURIComponent(limit)}`);
   }

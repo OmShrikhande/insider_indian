@@ -17,6 +17,7 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
   const chartRef = useRef(null);
   const candleRef = useRef(null);
   const seriesMarkersRef = useRef(null); // v5 markers plugin instance
+  const priceLinesRef = useRef([]);
   const seriesMapRef = useRef({});
   const prevSymbolRef = useRef(symbol);
   const initialZoomDoneRef = useRef(false);
@@ -31,6 +32,8 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
   const [currentBox, setCurrentBox] = useState(null); // { start: { time, price }, end: { time, price } }
   const [vpProfile, setVpProfile] = useState(null);
   const [droppedTrade, setDroppedTrade] = useState(null);
+  const [, setRenderTick] = useState(0);
+
   const sanitizeSeries = useCallback((rows) => {
     if (!Array.isArray(rows) || rows.length === 0) return [];
     const byTime = new Map();
@@ -82,6 +85,52 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
       }
     }, 50);
   }, [focusedCandle, plotData]);
+
+  // ─── Native Price Lines for Trades ──────────────────────────────────────────
+  useEffect(() => {
+    if (!candleRef.current) return;
+    
+    // Cleanup old price lines
+    priceLinesRef.current.forEach(line => {
+      try { candleRef.current.removePriceLine(line); } catch (e) {}
+    });
+    priceLinesRef.current = [];
+
+    if (!activeFocusedTrade) return;
+
+    try {
+      const entryLine = candleRef.current.createPriceLine({
+        price: activeFocusedTrade.entry,
+        color: '#00f2ff',
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: 'ENTRY',
+      });
+      
+      const tpLine = candleRef.current.createPriceLine({
+        price: activeFocusedTrade.target,
+        color: '#39ff14',
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: 'TP',
+      });
+      
+      const slLine = candleRef.current.createPriceLine({
+        price: activeFocusedTrade.stopLoss,
+        color: '#ff003c',
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: 'SL',
+      });
+
+      priceLinesRef.current = [entryLine, tpLine, slLine];
+    } catch (e) {
+      console.warn('Failed to draw price lines:', e);
+    }
+  }, [activeFocusedTrade, plotData]);
 
   const getTimeCoordinate = useCallback((time) => {
     const timeScale = chartRef.current?.timeScale?.();
@@ -161,6 +210,10 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
     chartRef.current = chart;
     seriesMapRef.current = {};
     seriesMarkersRef.current = null;
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+      setRenderTick(v => v + 1);
+    });
 
     return () => {
       resizeObs.disconnect();
@@ -724,6 +777,27 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
 
       {/* Shapes & VP Overlay (SVG) */}
       <svg className="absolute inset-0 pointer-events-none z-10 w-full h-full">
+        {/* Highlight Focused Trade Vertical Band */}
+        {activeFocusedTrade && focusedCandle && chartRef.current && (() => {
+          try {
+            const timeScale = chartRef.current.timeScale();
+            if (!timeScale) return null;
+            const x = timeScale.timeToCoordinate(focusedCandle.time);
+            if (x == null) return null;
+            return (
+              <g className="pointer-events-none">
+                <rect x={x - 15} y={0} width={30} height="100%" fill="rgba(0, 242, 255, 0.15)" />
+                <line x1={x} y1={0} x2={x} y2="100%" stroke="#00f2ff" strokeWidth="2" strokeDasharray="4 4" opacity="0.8" />
+                <text x={x + 18} y={40} fill="#00f2ff" fontSize="12" fontFamily="'JetBrains Mono', monospace" fontWeight="bold">
+                  TRADE SIGNAL FOCUS
+                </text>
+              </g>
+            );
+          } catch (e) {
+            return null;
+          }
+        })()}
+
         {/* Volume Profile Bars */}
         {vpProfile && chartRef.current && (
            <g opacity="0.4">

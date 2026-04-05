@@ -215,13 +215,21 @@ const Sidebar = ({
 
   const handleSearchSelect = useCallback((symbol) => {
     onSymbolChange(symbol);
+    if (viewMode === 'fno') {
+      onFnoModeChange?.(true);
+      const nextExpiry = (fnoExpiriesMap[symbol] || [])[0];
+      if (nextExpiry) {
+        setSelectedFnoExpiry(nextExpiry);
+      }
+    }
     setSearch('');
     setShowDropdown(false);
     setSearchResults([]);
-  }, [onSymbolChange]);
+  }, [onSymbolChange, viewMode, onFnoModeChange, fnoExpiriesMap]);
 
   const handleSearchKeyDown = useCallback((e) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
       const first = searchResults[0];
       if (first) {
         handleSearchSelect(first.symbol);
@@ -230,6 +238,7 @@ const Sidebar = ({
       }
     }
     if (e.key === 'Escape') {
+      e.preventDefault();
       setShowDropdown(false);
       setSearch('');
     }

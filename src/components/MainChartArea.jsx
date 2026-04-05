@@ -25,6 +25,10 @@ const MainChartArea = ({
   fnoSpotLoading = false,
   focusedTrade = null,
 }) => {
+  const effectiveIndicators = isFnoMode
+    ? { ...(activeIndicators || {}), smc: false }
+    : activeIndicators;
+  const effectiveFocusedTrade = isFnoMode ? null : focusedTrade;
   const spotSeriesForFno =
     Array.isArray(fnoSpotData) && fnoSpotData.length > 0 ? fnoSpotData : data;
 
@@ -32,19 +36,22 @@ const MainChartArea = ({
   if (isFnoMode) {
     return (
       <div className="absolute inset-0 flex">
-        <div className="w-1/2 h-full border-r border-[#1c2127]">
+        <div className="w-1/2 h-full border-r border-[#1c2127] relative">
+          <div className="absolute top-2 left-2 z-20 text-[9px] font-black tracking-widest uppercase bg-black/70 border border-[#1c2127] px-2 py-1 rounded text-[#00f2ff]">
+            Spot ({selectedSymbol})
+          </div>
           <ChartErrorBoundary>
             <CandlestickChart
               data={spotSeriesForFno}
               news={[]}
               symbol={`${selectedSymbol} (SPOT)`}
               timeframe={selectedTimeframe}
-              activeIndicators={activeIndicators}
+              activeIndicators={effectiveIndicators}
               activePatterns={activePatterns}
               showGrid={showGrid}
               candleStyle={candleStyle}
               onInfoClick={onInfoClick}
-              focusedTrade={focusedTrade}
+              focusedTrade={effectiveFocusedTrade}
             />
           </ChartErrorBoundary>
           {!loading && !fnoSpotLoading && spotSeriesForFno.length === 0 && (
@@ -63,39 +70,55 @@ const MainChartArea = ({
 
         <div className="w-1/2 h-full flex flex-col">
           <div className="flex-1 border-b border-[#1c2127] relative">
+            <div className="absolute top-2 left-2 z-20 text-[9px] font-black tracking-widest uppercase bg-black/70 border border-[#1c2127] px-2 py-1 rounded text-[#ff7b7b]">
+              Put ({fnoStrike || 'ATM'})
+            </div>
             <ChartErrorBoundary>
               <CandlestickChart
                 data={fnoData.peData}
                 news={[]}
                 symbol={`${selectedSymbol} PE ${fnoStrike}`}
                 timeframe={selectedTimeframe}
-                activeIndicators={activeIndicators}
+                activeIndicators={effectiveIndicators}
                 activePatterns={activePatterns}
                 showGrid={showGrid}
                 candleStyle={candleStyle}
                 onInfoClick={onInfoClick}
-                focusedTrade={focusedTrade}
+                focusedTrade={effectiveFocusedTrade}
               />
             </ChartErrorBoundary>
             {fnoData.loading && <div className="absolute top-4 right-4 text-[#ffea00] text-[8px] font-black animate-pulse tracking-widest z-10">SYNCING_PE...</div>}
+            {!fnoData.loading && (!fnoData.peData || fnoData.peData.length === 0) && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/40">
+                <span className="text-[10px] text-[#5d606b] font-mono tracking-widest text-center px-4">[ NO_PUT_BARS ]</span>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 relative">
+            <div className="absolute top-2 left-2 z-20 text-[9px] font-black tracking-widest uppercase bg-black/70 border border-[#1c2127] px-2 py-1 rounded text-[#39ff14]">
+              Call ({fnoStrike || 'ATM'})
+            </div>
             <ChartErrorBoundary>
               <CandlestickChart
                 data={fnoData.ceData}
                 news={[]}
                 symbol={`${selectedSymbol} CE ${fnoStrike}`}
                 timeframe={selectedTimeframe}
-                activeIndicators={activeIndicators}
+                activeIndicators={effectiveIndicators}
                 activePatterns={activePatterns}
                 showGrid={showGrid}
                 candleStyle={candleStyle}
                 onInfoClick={onInfoClick}
-                focusedTrade={focusedTrade}
+                focusedTrade={effectiveFocusedTrade}
               />
             </ChartErrorBoundary>
             {fnoData.loading && <div className="absolute top-4 right-4 text-[#ffea00] text-[8px] font-black animate-pulse tracking-widest z-10">SYNCING_CE...</div>}
+            {!fnoData.loading && (!fnoData.ceData || fnoData.ceData.length === 0) && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/40">
+                <span className="text-[10px] text-[#5d606b] font-mono tracking-widest text-center px-4">[ NO_CALL_BARS ]</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -154,12 +177,12 @@ const MainChartArea = ({
         news={[]} // News handled by right panel
         symbol={selectedSymbol}
         timeframe={selectedTimeframe}
-        activeIndicators={activeIndicators}
+        activeIndicators={effectiveIndicators}
         activePatterns={activePatterns}
         showGrid={showGrid}
         candleStyle={candleStyle}
         onInfoClick={onInfoClick}
-        focusedTrade={focusedTrade}
+        focusedTrade={effectiveFocusedTrade}
       />
     </ChartErrorBoundary>
   );
