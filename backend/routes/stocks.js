@@ -1,5 +1,7 @@
 const express = require('express');
 const stockService = require('../services/stockService');
+const newsService = require('../services/newsService');
+const tradeService = require('../services/tradeService');
 const {
   validateSymbol,
   validateTimeframe,
@@ -125,6 +127,46 @@ router.get('/symbols/metadata', validateTimeframe, async (req, res) => {
       success: false,
       error: error.message,
     });
+  }
+});
+
+/**
+ * GET /api/stocks/search
+ * Search symbols from stocks_summary
+ */
+router.get('/search/all', async (req, res) => {
+  try {
+    const { q = '' } = req.query;
+    const results = await stockService.searchSymbols(q);
+    res.json({ success: true, data: results });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/news
+ * Get latest market news
+ */
+router.get('/news/latest', async (req, res) => {
+  try {
+    const news = await newsService.getLatestNews();
+    res.json({ success: true, data: news });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/trades/futuristic
+ * Get futuristic trade suggestions
+ */
+router.get('/trades/futuristic', async (req, res) => {
+  try {
+    const trades = await tradeService.getFuturisticTrades();
+    res.json({ success: true, data: trades });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

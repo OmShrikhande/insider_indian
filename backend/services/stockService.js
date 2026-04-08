@@ -11,20 +11,27 @@ class StockService {
   async getStockData(symbol, timeframe = 'hourly', limit = 100) {
     try {
       // Determine which table to query based on timeframe
-      const tableName = timeframe === 'daily' ? 'stocks_daily' : 'stocks_hourly';
+      let tableName = 'stocks_hourly';
+      switch (timeframe) {
+        case '1m': tableName = 'stocks_1min'; break;
+        case '5m': tableName = 'stocks_5min'; break;
+        case '15m': tableName = 'stocks_15min'; break;
+        case '1h': tableName = 'stocks_hourly'; break;
+        case '1d': tableName = 'stocks_daily'; break;
+        default: tableName = 'stocks_hourly';
+      }
 
       // Validate inputs
       if (!symbol || typeof symbol !== 'string') {
         throw new Error('Invalid symbol provided');
       }
 
-      if (!['hourly', 'daily'].includes(timeframe)) {
-        throw new Error('Invalid timeframe. Must be "hourly" or "daily"');
-      }
+      const validTimeframes = ['1m', '5m', '15m', '1h', '1d'];
+      const queryTimeframe = validTimeframes.includes(timeframe) ? timeframe : '1h';
 
       const query = `
         SELECT
-          timestamp,
+          date,
           open,
           high,
           low,
@@ -35,7 +42,7 @@ class StockService {
           sector
         FROM ${tableName}
         WHERE symbol = {symbol:String}
-        ORDER BY timestamp DESC
+        ORDER BY date ASC
         LIMIT {limit:UInt32}
       `;
 
@@ -52,13 +59,14 @@ class StockService {
 
       // Transform data for frontend (lightweight-charts format)
       return data.map(row => ({
-        time: Math.floor(new Date(row.timestamp).getTime() / 1000), // Convert to Unix timestamp
+        // Using the 'date' column which contains full ISO DateTime string
+        time: Math.floor(new Date(row.date).getTime() / 1000), 
         open: parseFloat(row.open),
         high: parseFloat(row.high),
         low: parseFloat(row.low),
         close: parseFloat(row.close),
         volume: parseInt(row.volume) || 0,
-      })).reverse(); // Reverse to chronological order
+      })); // Date ASC already provides chronological order
 
     } catch (error) {
       console.error('Error fetching stock data:', error);
@@ -112,10 +120,10 @@ class StockService {
           symbol,
           sector,
           COUNT(*) as total_records,
-          MIN(dat) as start_date,
-          MAX(dat) as end_date,
-          MIN(timestamp) as earliest_timestamp,
-          MAX(timestamp) as latest_timestamp
+          MIN(date) as start_date,
+          MAX(date) as end_date,
+          MIN(date) as earliest_timestamp,
+          MAX(date) as latest_timestamp
         FROM ${tableName}
         GROUP BY symbol, sector
         ORDER BY symbol
@@ -175,7 +183,7 @@ class StockService {
 
       const query = `
         SELECT
-          timestamp,
+          date,
           open,
           high,
           low,
@@ -186,9 +194,9 @@ class StockService {
           sector
         FROM ${tableName}
         WHERE symbol = {symbol:String}
-        AND dat >= {startDate:String}
-        AND dat <= {endDate:String}
-        ORDER BY timestamp ASC
+        AND date >= {startDate:String}
+        AND date <= {endDate:String}
+        ORDER BY date ASC
       `;
 
       const result = await client.query({
@@ -202,9 +210,8 @@ class StockService {
       });
 
       const data = await result.json();
-
       return data.map(row => ({
-        time: Math.floor(new Date(row.timestamp).getTime() / 1000),
+        time: Math.floor(new Date(row.date).getTime() / 1000),
         open: parseFloat(row.open),
         high: parseFloat(row.high),
         low: parseFloat(row.low),
@@ -215,6 +222,38 @@ class StockService {
     } catch (error) {
       console.error('Error fetching stock data by date range:', error);
       throw new Error(`Failed to fetch stock data: ${error.message}`);
+    }
+  }
+
+  /**
+   * Search symbols from stocks_summary
+   * @param {string} query - Search query
+   * @returns {Promise<Array>} Array of matching symbols
+   */
+  async searchSymbols(query = '') {
+    try {
+      const sqlQuery = `
+        SELECT
+          symbol,
+          in_daily,
+          in_hourly
+        FROM stocks_summary
+        WHERE symbol LIKE {query:String}
+        LIMIT 20
+      `;
+
+      const result = await client.query({
+        query: sqlQuery,
+        query_params: {
+          query: `%${query.toUpperCase()}%`,
+        },
+        format: 'JSONEachRow',
+      });
+
+      return await result.json();
+    } catch (error) {
+      console.error('Error searching symbols:', error);
+      throw new Error(`Failed to search symbols: ${error.message}`);
     }
   }
 }

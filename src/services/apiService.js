@@ -32,28 +32,34 @@ class ApiService {
     }
   }
 
-  // Get stock data for a symbol
-  async getStockData(symbol, timeframe = 'hourly', limit = 100) {
-    const backendTimeframe = timeframe === '1d' ? 'daily' : 'hourly';
-    return this.request(`/api/stocks/${symbol}?timeframe=${backendTimeframe}&limit=${limit}`);
+  // Get stock data for a symbol — fetches all available data by default
+  async getStockData(symbol, timeframe = '1h', limit = 100000) {
+    return this.request(`/api/stocks/${symbol}?timeframe=${timeframe}&limit=${limit}`);
   }
 
-  // Get stock data within date range
-  async getStockDataByDateRange(symbol, timeframe = 'hourly', startDate, endDate) {
-    const backendTimeframe = timeframe === '1d' ? 'daily' : 'hourly';
-    return this.request(`/api/stocks/${symbol}/range?timeframe=${backendTimeframe}&startDate=${startDate}&endDate=${endDate}`);
+  // Search symbols from stocks_summary
+  async searchSymbols(query) {
+    return this.request(`/api/stocks/search/all?q=${encodeURIComponent(query)}`);
+  }
+
+  // Get latest news
+  async getLatestNews() {
+    return this.request('/api/stocks/news/latest');
+  }
+
+  // Get futuristic trades
+  async getFuturisticTrades() {
+    return this.request('/api/stocks/trades/futuristic');
   }
 
   // Get available symbols
-  async getAvailableSymbols(timeframe = 'hourly') {
-    const backendTimeframe = timeframe === '1d' ? 'daily' : 'hourly';
-    return this.request(`/api/stocks/symbols?timeframe=${backendTimeframe}`);
+  async getAvailableSymbols(timeframe = '1h') {
+    return this.request(`/api/stocks/symbols?timeframe=${timeframe}`);
   }
 
   // Get symbols metadata with data ranges
-  async getSymbolsMetadata(timeframe = 'hourly') {
-    const backendTimeframe = timeframe === '1d' ? 'daily' : 'hourly';
-    return this.request(`/api/stocks/symbols/metadata?timeframe=${backendTimeframe}`);
+  async getSymbolsMetadata(timeframe = '1h') {
+    return this.request(`/api/stocks/symbols/metadata?timeframe=${timeframe}`);
   }
 
   // Health check

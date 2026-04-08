@@ -18,12 +18,12 @@ const validateSymbol = (req, res, next) => {
 };
 
 const validateTimeframe = (req, res, next) => {
-  const timeframe = req.query.timeframe || 'hourly';
+  const timeframe = req.query.timeframe || '1h';
 
-  if (!['hourly', 'daily'].includes(timeframe)) {
+  if (!['1m', '5m', '15m', '1h', '1d', 'hourly', 'daily'].includes(timeframe)) {
     return res.status(400).json({
       success: false,
-      error: 'Invalid timeframe. Must be "hourly" or "daily".',
+      error: 'Invalid timeframe. Must be "1m", "5m", "15m", "1h", "1d", "hourly" or "daily".',
     });
   }
 
@@ -32,13 +32,13 @@ const validateTimeframe = (req, res, next) => {
 };
 
 const validateLimit = (req, res, next) => {
-  const limit = req.query.limit || 100;
+  const limit = req.query.limit || 1000;
   const limitNum = parseInt(limit);
 
-  if (isNaN(limitNum) || limitNum < 1 || limitNum > 1000) {
+  if (isNaN(limitNum) || limitNum < 1 || limitNum > 100000) {
     return res.status(400).json({
       success: false,
-      error: 'Invalid limit. Must be a number between 1 and 1000.',
+      error: 'Invalid limit. Must be a number between 1 and 100000.',
     });
   }
 

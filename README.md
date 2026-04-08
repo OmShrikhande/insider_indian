@@ -1,16 +1,52 @@
-# React + Vite
+# ProTrader: Advanced Indian Stock Analysis Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A premium, high-performance stock analysis dashboard built for Indian markets, featuring real-time data visualization, predictive intelligence, and a "top-secret" ProTrader aesthetic.
 
-Currently, two official plugins are available:
+## 🚀 Key Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Pure Black Interface**: Optimized for high-contrast trading in low-light environments.
+- **Advanced Charting**: Powered by `lightweight-charts` with real-time updates.
+- **Indicators**:
+  - **SMA (20)**: Simple Moving Average for trend analysis.
+  - **RSI (14)**: Relative Strength Index in a dedicated sub-pane for momentum tracking.
+- **Predictive Signals**: Specialized "Futuristic Trades" panel with confidence scores.
+- **Intelligence Feed**: Real-time market news and sentiment analysis.
+- **Deep Data Integration**: Supports multiple timeframes (`1m`, `5m`, `15m`, `1h`, `1d`) pulled directly from ClickHouse.
 
-## React Compiler
+## ⌨️ Shortcuts
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Type Anywhere**: Simply start typing any symbol name (e.g., "AAPL") to instantly trigger the search modal.
+- **`/`**: Manual focus on the symbol search bar.
+- **Esc**: Clear search or close dropdowns.
 
-## Expanding the ESLint configuration
+## 🛠️ Technology Stack
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- **Frontend**: React 19, Vite, Tailwind CSS, Lightweight Charts.
+- **Backend**: Node.js, Express 5.
+- **Database**: ClickHouse (OLAP) for high-speed time-series data.
+
+## 📂 Project Structure
+
+- `/src/components`: UI components (Dashboard, Chart, Sidebar, etc.)
+- `/src/hooks`: Custom React hooks for data fetching.
+- `/src/services`: API client for backend communication.
+- `/backend/services`: ClickHouse query logic and data processing.
+- `/backend/routes`: RESTful API endpoints.
+
+## 🚦 Getting Started
+
+1. **Prerequisites**: Ensure ClickHouse is running on Docker (`localhost:8123`).
+2. **Backend**:
+   ```bash
+   cd backend
+   npm install
+   npm run dev
+   ```
+3. **Frontend**:
+   ```bash
+   npm install
+   npm run dev
+   ```
+
+---
+**SECURE UPLINK ESTABLISHED | ENCRYPTED | NOMINAL**
