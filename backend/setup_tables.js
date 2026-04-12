@@ -90,6 +90,27 @@ async function setupTables() {
     });
     console.log('✅ Created news table');
 
+    // Create screener_results table
+    await client.exec({
+      query: `
+        CREATE TABLE IF NOT EXISTS screener_results (
+          id String,
+          screener_type String,
+          symbol String,
+          close Float64,
+          volume UInt64,
+          score Float64,
+          trend_type String,
+          rank UInt32,
+          created_at DateTime,
+          updated_at DateTime
+        ) ENGINE = MergeTree()
+        ORDER BY (screener_type, rank, created_at)
+        TTL updated_at + INTERVAL 1 DAY
+      `
+    });
+    console.log('✅ Created screener_results table');
+
     console.log('All tables created successfully!');
 
   } catch (error) {

@@ -179,7 +179,7 @@ const Dashboard = () => {
 
   return (
     <div className="flex h-screen overflow-hidden elite-dashboard font-mono-elite bg-black">
-      {showScreener && <ScreenerPanel onClose={() => setShowScreener(false)} />}
+      {showScreener && <ScreenerPanel onClose={() => setShowScreener(false)} isRightSidebarCollapsed={isRightSidebarCollapsed} />}
       {showIndexChart && indexUnderlyingForChart && (
         <IndexOhlcChartModal
           underlying={indexUnderlyingForChart}
