@@ -19,6 +19,7 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
   const seriesMarkersRef = useRef(null); // v5 markers plugin instance
   const seriesMapRef = useRef({});
   const prevSymbolRef = useRef(symbol);
+  const initialZoomDoneRef = useRef(false);
   const [tooltipData, setTooltipData] = useState(null);
   const [newsMarkers, setNewsMarkers] = useState([]);
   const [drawings, setDrawings] = useState([]);
@@ -58,8 +59,9 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
         textColor: '#848e9c',
         timeVisible: true,
         secondsVisible: false,
-        // Critical: ensure enough space for the time axis labels
-        barSpacing: 6,
+        // Start zoomed-in by default and keep interaction responsive.
+        barSpacing: 10,
+        minBarSpacing: 2,
         rightOffset: 5,
       },
       handleScroll: true,
@@ -293,9 +295,47 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
         // SMC Detection
         const smc = detectSMC(data);
         const smcMarkers = [];
+        const smcBoxes = []; // New: filled boxes for Order Blocks
+
         if (activeIndicators?.smc) {
+          // Keep BOS/CHoCH as markers for now
           smc.bos.forEach(b => smcMarkers.push({ time: b.time, position: 'aboveBar', shape: 'arrowDown', color: b.color, text: b.type }));
           smc.choch.forEach(c => smcMarkers.push({ time: c.time, position: 'aboveBar', shape: 'arrowDown', color: c.color, text: c.type }));
+
+          // Add Order Blocks as filled boxes (ranges)
+          smc.obs.forEach(ob => {
+            const boxColor = ob.sentiment === 'bull' ? 'rgba(57, 255, 20, 0.2)' : 'rgba(255, 0, 60, 0.2)';
+            const borderColor = ob.sentiment === 'bull' ? '#39ff14' : '#ff003c';
+
+            smcBoxes.push({
+              id: `ob_${ob.time}`,
+              type: 'box',
+              start: { time: ob.time, price: ob.low },
+              end: { time: ob.time + 10, price: ob.high }, // Extend box for visibility
+              color: boxColor,
+              borderColor: borderColor,
+              fill: true,
+              label: ob.type
+            });
+          });
+
+          // Add Trade Suggestion Ranges
+          smc.suggestions.forEach((suggestion, idx) => {
+            const rangeColor = suggestion.type === 'LONG' ? 'rgba(57, 255, 20, 0.1)' : 'rgba(255, 0, 60, 0.1)';
+            const borderColor = suggestion.type === 'LONG' ? '#39ff14' : '#ff003c';
+            const latestTime = data[data.length - 1].time;
+
+            smcBoxes.push({
+              id: `trade_${idx}_${latestTime}`,
+              type: 'box',
+              start: { time: latestTime - 50, price: suggestion.range.min }, // Show range for last 50 candles
+              end: { time: latestTime + 20, price: suggestion.range.max },
+              color: rangeColor,
+              borderColor: borderColor,
+              fill: true,
+              label: `${suggestion.type} ${suggestion.entry.toFixed(2)}`
+            });
+          });
         }
 
         // Convert news to markers (limit to last 5)
@@ -316,6 +356,16 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
           seriesMarkersRef.current = createSeriesMarkers(candleRef.current, allMarkers);
         }
 
+        // Add SMC boxes to drawings for range display
+        if (smcBoxes.length > 0) {
+          setDrawings(prev => {
+            // Remove old SMC boxes first
+            const filtered = prev.filter(d => !d.id?.startsWith('ob_'));
+            // Add new SMC boxes
+            return [...filtered, ...smcBoxes];
+          });
+        }
+
         // Volume Profile Overlay
         if (activeIndicators?.vp) {
           const vp = calculateVolumeProfile(data);
@@ -329,13 +379,61 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
       }
     }
 
-    // Only fit content when symbol changes or first data load
-    if (prevSymbolRef.current !== symbol || !seriesMapRef.current._initialFitDone) {
-      chart.timeScale().fitContent();
+    const timeScale = chart.timeScale();
+    const zoomToRecentBars = (barCount = 140) => {
+      const total = data.length;
+      if (total < 2) return;
+      const to = total - 1 + 4;
+      const from = Math.max(0, to - barCount);
+      timeScale.setVisibleLogicalRange({ from, to });
+    };
+
+    if (!initialZoomDoneRef.current) {
+      zoomToRecentBars();
+      initialZoomDoneRef.current = true;
       prevSymbolRef.current = symbol;
-      seriesMapRef.current._initialFitDone = true;
+      return;
+    }
+
+    if (prevSymbolRef.current !== symbol) {
+      zoomToRecentBars();
+      prevSymbolRef.current = symbol;
     }
   }, [data, news, activeIndicators, activePatterns, symbol]);
+
+  const animateZoom = (direction) => {
+    const ts = chartRef.current?.timeScale();
+    if (!ts) return;
+    const range = ts.getVisibleLogicalRange();
+    if (!range) return;
+
+    const startFrom = range.from;
+    const startTo = range.to;
+    const width = startTo - startFrom;
+    if (width <= 0) return;
+
+    const factor = direction === 'in' ? 0.88 : 1.12;
+    const targetWidth = width * factor;
+    const center = (startFrom + startTo) / 2;
+    const targetFrom = center - targetWidth / 2;
+    const targetTo = center + targetWidth / 2;
+
+    const duration = 140;
+    const begin = performance.now();
+    const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+
+    const step = (now) => {
+      const progress = Math.min(1, (now - begin) / duration);
+      const eased = easeOut(progress);
+      ts.setVisibleLogicalRange({
+        from: startFrom + (targetFrom - startFrom) * eased,
+        to: startTo + (targetTo - startTo) * eased,
+      });
+      if (progress < 1) requestAnimationFrame(step);
+    };
+
+    requestAnimationFrame(step);
+  };
 
   const handleChartClick = useCallback((e) => {
     if (!chartRef.current || !candleRef.current) return;
@@ -447,14 +545,7 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
         <button
           onClick={e => { 
             e.stopPropagation(); 
-            const ts = chartRef.current?.timeScale();
-            if (ts) {
-              const range = ts.getVisibleLogicalRange();
-              if (range) {
-                const width = range.to - range.from;
-                ts.setVisibleLogicalRange({ from: range.from + width * 0.1, to: range.to - width * 0.1 });
-              }
-            }
+            animateZoom('in');
           }}
           className="w-8 h-8 flex items-center justify-center text-[#848e9c] hover:bg-[#1c2127] rounded"
           title="Zoom In"
@@ -464,14 +555,7 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
         <button
           onClick={e => { 
             e.stopPropagation(); 
-            const ts = chartRef.current?.timeScale();
-            if (ts) {
-              const range = ts.getVisibleLogicalRange();
-              if (range) {
-                const width = range.to - range.from;
-                ts.setVisibleLogicalRange({ from: range.from - width * 0.1, to: range.to + width * 0.1 });
-              }
-            }
+            animateZoom('out');
           }}
           className="w-8 h-8 flex items-center justify-center text-[#848e9c] hover:bg-[#1c2127] rounded"
           title="Zoom Out"
@@ -513,14 +597,55 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
                   stroke="rgba(0,242,255,0.7)" strokeWidth="1.5" 
                 />
               )}
-              {draw.type === 'box' && (
-                <rect 
-                  x={Math.min(chartRef.current?.timeScale().timeToCoordinate(draw.start.time), chartRef.current?.timeScale().timeToCoordinate(draw.end.time))}
-                  y={Math.min(chartRef.current?.priceScale('right').priceToCoordinate(draw.start.price), chartRef.current?.priceScale('right').priceToCoordinate(draw.end.price))}
-                  width={Math.abs(chartRef.current?.timeScale().timeToCoordinate(draw.start.time) - chartRef.current?.timeScale().timeToCoordinate(draw.end.time))}
-                  height={Math.abs(chartRef.current?.priceScale('right').priceToCoordinate(draw.start.price) - chartRef.current?.priceScale('right').priceToCoordinate(draw.end.price))}
-                  fill="rgba(0,242,255,0.15)" stroke="rgba(0,242,255,0.3)" 
-                />
+              {draw.type === 'box' && chartRef.current && typeof chartRef.current.priceScale === 'function' && (
+                (() => {
+                  try {
+                    const timeScale = chartRef.current.timeScale();
+                    const priceScale = chartRef.current.priceScale('right');
+
+                    if (!timeScale || !priceScale || typeof priceScale.priceToCoordinate !== 'function') {
+                      return null;
+                    }
+
+                    const x1 = timeScale.timeToCoordinate(draw.start.time);
+                    const x2 = timeScale.timeToCoordinate(draw.end.time);
+                    const y1 = priceScale.priceToCoordinate(draw.start.price);
+                    const y2 = priceScale.priceToCoordinate(draw.end.price);
+
+                    if (x1 == null || x2 == null || y1 == null || y2 == null) {
+                      return null;
+                    }
+
+                    return (
+                      <>
+                        <rect
+                          x={Math.min(x1, x2)}
+                          y={Math.min(y1, y2)}
+                          width={Math.abs(x1 - x2)}
+                          height={Math.abs(y1 - y2)}
+                          fill={draw.fill ? draw.color : "rgba(0,242,255,0.15)"}
+                          stroke={draw.borderColor || "rgba(0,242,255,0.3)"}
+                          strokeWidth={draw.fill ? "2" : "1"}
+                        />
+                        {draw.label && (
+                          <text
+                            x={x1 + 5}
+                            y={y1 - 5}
+                            fill={draw.borderColor || "#00f2ff"}
+                            fontSize="10"
+                            fontFamily="'JetBrains Mono', monospace"
+                            fontWeight="bold"
+                          >
+                            {draw.label}
+                          </text>
+                        )}
+                      </>
+                    );
+                  } catch (error) {
+                    console.warn('Error rendering box:', error);
+                    return null;
+                  }
+                })()
               )}
               {draw.type === 'hline' && (
                 <line 
@@ -611,15 +736,23 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
       {/* Drawing overlays */}
       <div className="absolute inset-0 pointer-events-none z-10">
         {drawings.map((draw, idx) => {
-          const coord = chartRef.current?.priceScale('right').priceToCoordinate(draw.price);
-          if (coord == null) return null;
-          return (
-            <div key={idx} style={{ position: 'absolute', top: coord, left: 0, right: 0, height: '1px', background: 'rgba(0,242,255,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 68 }}>
-              <span style={{ background: '#000', color: '#00f2ff', fontSize: 8, fontFamily: 'monospace', padding: '0 3px', border: '1px solid rgba(0,242,255,0.3)', borderRadius: 2 }}>
-                {draw.price.toFixed(2)}
-              </span>
-            </div>
-          );
+          try {
+            if (!chartRef.current || typeof chartRef.current.priceScale !== 'function') return null;
+            const priceScale = chartRef.current.priceScale('right');
+            if (!priceScale || typeof priceScale.priceToCoordinate !== 'function') return null;
+            const coord = priceScale.priceToCoordinate(draw.price);
+            if (coord == null) return null;
+            return (
+              <div key={idx} style={{ position: 'absolute', top: coord, left: 0, right: 0, height: '1px', background: 'rgba(0,242,255,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 68 }}>
+                <span style={{ background: '#000', color: '#00f2ff', fontSize: 8, fontFamily: 'monospace', padding: '0 3px', border: '1px solid rgba(0,242,255,0.3)', borderRadius: 2 }}>
+                  {draw.price.toFixed(2)}
+                </span>
+              </div>
+            );
+          } catch (error) {
+            console.warn('Error rendering drawing overlay:', error);
+            return null;
+          }
         })}
       </div>
 

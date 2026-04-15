@@ -23,16 +23,39 @@ const TradeFeed = ({ trades = [] }) => {
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 text-[10px] font-mono-elite mb-4">
+            <div className="grid grid-cols-3 gap-2 text-[10px] font-mono-elite mb-4">
               <div className="bg-white/5 p-2 rounded border border-white/5">
-                <span className="text-[#5d606b] block mb-1 uppercase text-[8px]">ENTRY_P</span>
+                <span className="text-[#5d606b] block mb-1 uppercase text-[8px]">ENTRY</span>
                 <div className="text-[#d1d4dc] font-black">${trade.entry.toFixed(2)}</div>
               </div>
               <div className="bg-white/5 p-2 rounded border border-white/5">
-                <span className="text-[#5d606b] block mb-1 uppercase text-[8px]">TARGET_V</span>
+                <span className="text-[#5d606b] block mb-1 uppercase text-[8px]">TARGET</span>
                 <div className="text-[#39ff14] font-black">${trade.target.toFixed(2)}</div>
               </div>
+              <div className="bg-white/5 p-2 rounded border border-white/5">
+                <span className="text-[#5d606b] block mb-1 uppercase text-[8px]">STOP</span>
+                <div className="text-[#ff003c] font-black">${trade.stopLoss.toFixed(2)}</div>
+              </div>
             </div>
+
+            {trade.range && (
+              <div className="mb-4 p-2 bg-white/5 rounded border border-white/10">
+                <div className="text-[8px] text-[#5d606b] uppercase mb-2 font-bold">TRADE RANGE</div>
+                <div className="flex justify-between text-[9px] font-mono">
+                  <span className="text-[#5d606b]">MIN: <span className="text-[#d1d4dc] font-bold">${trade.range.min.toFixed(2)}</span></span>
+                  <span className="text-[#5d606b]">MAX: <span className="text-[#d1d4dc] font-bold">${trade.range.max.toFixed(2)}</span></span>
+                </div>
+                <div className="mt-1 h-1 bg-[#1c2127] rounded-full overflow-hidden">
+                  <div
+                    className={`h-full ${trade.type === 'LONG' ? 'bg-gradient-to-r from-[#ff003c] via-[#39ff14] to-[#39ff14]' : 'bg-gradient-to-r from-[#39ff14] via-[#ff003c] to-[#ff003c]'}`}
+                    style={{
+                      width: `${((trade.entry - trade.range.min) / (trade.range.max - trade.range.min)) * 100}%`,
+                      marginLeft: 'auto'
+                    }}
+                  ></div>
+                </div>
+              </div>
+            )}
 
             <div className="text-[10px] text-[#848e9c] mb-4 leading-relaxed font-medium bg-[#050505] p-2 rounded border border-[#1c2127]">
               <span className="text-[#00f2ff] mr-1">ANALYSIS:</span> "{trade.reason}"

@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { testConnection } = require('./config/database');
+const upstoxSyncService = require('./services/upstoxSyncService');
 
 // Import routes
 const stockRoutes = require('./routes/stocks');
@@ -75,6 +76,10 @@ const startServer = async () => {
       console.log(`🚀 Server is running on port ${PORT}`);
       console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🔗 API Base URL: ${process.env.API_BASE_URL || `http://localhost:${PORT}`}`);
+    });
+
+    upstoxSyncService.init().catch((error) => {
+      console.error('[UpstoxSync] Failed to initialize:', error.message);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

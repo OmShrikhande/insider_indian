@@ -83,17 +83,28 @@ export const detectSMC = (data) => {
 
   // --- Trade Suggestions ---
   const latestPrice = data[data.length - 1].close;
-  const activeOB = obs.filter(ob => 
+  const activeOB = obs.filter(ob =>
     ob.sentiment === 'bull' ? latestPrice > ob.price : latestPrice < ob.price
   ).slice(-3);
 
   activeOB.forEach(ob => {
+    const entry = ob.sentiment === 'bull' ? ob.high : ob.low;
+    const target = ob.sentiment === 'bull' ? ob.high * 1.05 : ob.low * 0.95;
+    const stopLoss = ob.sentiment === 'bull' ? ob.low : ob.high;
+
     suggestions.push({
       symbol: ob.symbol,
       type: ob.sentiment === 'bull' ? 'LONG' : 'SHORT',
-      entry: ob.sentiment === 'bull' ? ob.high : ob.low,
-      target: ob.sentiment === 'bull' ? ob.high * 1.05 : ob.low * 0.95,
-      stopLoss: ob.sentiment === 'bull' ? ob.low : ob.high,
+      entry,
+      target,
+      stopLoss,
+      range: {
+        min: Math.min(entry, target, stopLoss),
+        max: Math.max(entry, target, stopLoss),
+        entry,
+        target,
+        stopLoss
+      },
       reason: `${ob.type} detected with structure shift. High volume confirmation.`
     });
   });
