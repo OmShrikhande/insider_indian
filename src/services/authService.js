@@ -29,7 +29,13 @@ class AuthService {
   }
 
   getCurrentUser() {
-    return JSON.parse(localStorage.getItem('roxey_token'));
+    try {
+      const item = localStorage.getItem('roxey_token');
+      if (!item || item === 'undefined' || item === 'null') return null;
+      return JSON.parse(item);
+    } catch {
+      return null;
+    }
   }
 }
 
