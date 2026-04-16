@@ -1,4 +1,4 @@
-const { client } = require('../config/database');
+const { client, testConnection } = require('../config/database');
 
 class NewsService {
   constructor() {
@@ -9,10 +9,17 @@ class NewsService {
   }
 
   async initBackgroundSync() {
+    // Check database connection before starting sync
+    const dbConnected = await testConnection();
+    if (!dbConnected) {
+      console.warn('[NewsService] Database not available. Skipping news sync initialization.');
+      return;
+    }
+
     console.log('[NewsService] Initializing 90-minute background sync...');
     // Initial fetch
     await this.fetchAndStoreNews();
-    
+
     // Set interval (90 mins = 5400000ms)
     this.syncInterval = setInterval(() => {
       this.fetchAndStoreNews();
@@ -96,11 +103,13 @@ class NewsService {
         query,
         format: 'JSONEachRow'
       });
-      
+
       return await result.json();
     } catch (error) {
       console.error('[NewsService] Database retrieval failed:', error);
-      return [];
+      // Return mock data when database is unavailable
+      console.log('[NewsService] Returning mock news data due to database unavailability');
+      return this.getMockNews();
     }
   }
 

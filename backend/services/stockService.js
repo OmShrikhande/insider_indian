@@ -1,4 +1,5 @@
 const { client } = require('../config/database');
+const marketService = require('./marketService');
 
 class StockService {
   /**
@@ -29,6 +30,7 @@ class StockService {
       const validTimeframes = ['1m', '5m', '15m', '1h', '1d'];
       const queryTimeframe = validTimeframes.includes(timeframe) ? timeframe : '1h';
 
+      // Get data ordered by date DESC to get most recent first, then filter out weekends
       const query = `
         SELECT
           date,
@@ -42,7 +44,7 @@ class StockService {
           sector
         FROM ${tableName}
         WHERE symbol = {symbol:String}
-        ORDER BY date ASC
+        ORDER BY date DESC
         LIMIT {limit:UInt32}
       `;
 
@@ -55,18 +57,51 @@ class StockService {
         format: 'JSONEachRow',
       });
 
-      const data = await result.json();
+      let data = await result.json();
 
-      // Transform data for frontend (lightweight-charts format)
-      return data.map(row => ({
+      // Get holidays for filtering
+      const holidays = await marketService.getHolidays();
+
+      // Filter out weekend and holiday data
+      data = data.filter(row => {
+        const date = new Date(row.date);
+        const dayOfWeek = date.getDay();
+
+        // Exclude weekends
+        if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+
+        // Exclude holidays
+        const dateStr = date.toISOString().split('T')[0];
+        const isHoliday = holidays.some(holiday =>
+          holiday.date === dateStr &&
+          (holiday.closedExchanges.includes('NSE') || holiday.type === 'TRADING_HOLIDAY')
+        );
+        if (isHoliday) return false;
+
+        return true;
+      });
+
+      // Remove duplicates by timestamp, keeping the last occurrence
+      const seen = new Set();
+      data = data.filter(row => {
+        const timestamp = Math.floor(new Date(row.date).getTime() / 1000);
+        if (seen.has(timestamp)) {
+          return false;
+        }
+        seen.add(timestamp);
+        return true;
+      });
+
+      // Reverse back to chronological order and transform for frontend
+      return data.reverse().map(row => ({
         // Using the 'date' column which contains full ISO DateTime string
-        time: Math.floor(new Date(row.date).getTime() / 1000), 
+        time: Math.floor(new Date(row.date).getTime() / 1000),
         open: parseFloat(row.open),
         high: parseFloat(row.high),
         low: parseFloat(row.low),
         close: parseFloat(row.close),
         volume: parseInt(row.volume) || 0,
-      })); // Date ASC already provides chronological order
+      }));
 
     } catch (error) {
       console.error('Error fetching stock data:', error);
@@ -209,7 +244,41 @@ class StockService {
         format: 'JSONEachRow',
       });
 
-      const data = await result.json();
+      let data = await result.json();
+
+      // Get holidays for filtering
+      const holidays = await marketService.getHolidays();
+
+      // Filter out weekend and holiday data
+      data = data.filter(row => {
+        const date = new Date(row.date);
+        const dayOfWeek = date.getDay();
+
+        // Exclude weekends
+        if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+
+        // Exclude holidays
+        const dateStr = date.toISOString().split('T')[0];
+        const isHoliday = holidays.some(holiday =>
+          holiday.date === dateStr &&
+          (holiday.closedExchanges.includes('NSE') || holiday.type === 'TRADING_HOLIDAY')
+        );
+        if (isHoliday) return false;
+
+        return true;
+      });
+
+      // Remove duplicates by timestamp, keeping the last occurrence
+      const seen = new Set();
+      data = data.filter(row => {
+        const timestamp = Math.floor(new Date(row.date).getTime() / 1000);
+        if (seen.has(timestamp)) {
+          return false;
+        }
+        seen.add(timestamp);
+        return true;
+      });
+
       return data.map(row => ({
         time: Math.floor(new Date(row.date).getTime() / 1000),
         open: parseFloat(row.open),

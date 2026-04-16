@@ -2,6 +2,7 @@ const express = require('express');
 const stockService = require('../services/stockService');
 const newsService = require('../services/newsService');
 const tradeService = require('../services/tradeService');
+const marketService = require('../services/marketService');
 const {
   validateSymbol,
   validateTimeframe,
@@ -166,6 +167,48 @@ router.get('/trades/futuristic', async (req, res) => {
   try {
     const trades = await tradeService.getFuturisticTrades();
     res.json({ success: true, data: trades });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/market/status
+ * Get current market status (open/closed) and timings
+ */
+router.get('/market/status', async (req, res) => {
+  try {
+    const status = await marketService.getMarketStatus();
+    res.json({ success: true, data: status });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/market/holidays
+ * Get market holidays
+ */
+router.get('/market/holidays', async (req, res) => {
+  try {
+    const holidays = await marketService.getHolidays();
+    res.json({ success: true, data: holidays });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/market/timings
+ * Get market timings for a specific date
+ * Query parameters:
+ * - date: date in YYYY-MM-DD format (default: today)
+ */
+router.get('/market/timings', async (req, res) => {
+  try {
+    const { date } = req.query;
+    const timings = await marketService.getTimings(date);
+    res.json({ success: true, data: timings, date: date || new Date().toISOString().split('T')[0] });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
