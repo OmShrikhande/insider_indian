@@ -1,12 +1,14 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { testConnection } = require('./config/database');
+const { testConnection, client } = require('./config/database');
 const upstoxSyncService = require('./services/upstoxSyncService');
 const marketService = require('./services/marketService');
 
 // Import routes
 const stockRoutes = require('./routes/stocks');
+const authRoutes = require('./routes/auth');
+const watchlistRoutes = require('./routes/watchlist');
 
 const app = express();
 
@@ -44,6 +46,8 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/stocks', stockRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/watchlist', watchlistRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -75,7 +79,9 @@ async function setupDatabase() {
       `CREATE TABLE IF NOT EXISTS stocks_15min (date DateTime, open Float64, high Float64, low Float64, close Float64, volume UInt64, symbol String, timeframe String, sector String) ENGINE = MergeTree() ORDER BY (symbol, date)`,
       `CREATE TABLE IF NOT EXISTS stocks_hourly (date DateTime, open Float64, high Float64, low Float64, close Float64, volume UInt64, symbol String, timeframe String, sector String) ENGINE = MergeTree() ORDER BY (symbol, date)`,
       `CREATE TABLE IF NOT EXISTS stocks_daily (date DateTime, open Float64, high Float64, low Float64, close Float64, volume UInt64, symbol String, timeframe String, sector String) ENGINE = MergeTree() ORDER BY (symbol, date)`,
-      `CREATE TABLE IF NOT EXISTS news (id String, title String, summary String, timestamp DateTime, source String, url String, sentiment String) ENGINE = MergeTree() ORDER BY timestamp`
+      `CREATE TABLE IF NOT EXISTS news (id String, title String, summary String, timestamp DateTime, source String, url String, sentiment String) ENGINE = MergeTree() ORDER BY timestamp`,
+      `CREATE TABLE IF NOT EXISTS users (id String, username String, password_hash String, created_at DateTime DEFAULT now()) ENGINE = MergeTree() ORDER BY username`,
+      `CREATE TABLE IF NOT EXISTS watchlists (user_id String, symbol String, created_at DateTime DEFAULT now()) ENGINE = MergeTree() ORDER BY (user_id, symbol)`
     ];
 
     for (const query of createQueries) {

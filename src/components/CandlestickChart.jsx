@@ -12,7 +12,7 @@ import { scanPatterns } from '../lib/patterns';
 import { detectSMC } from '../lib/smc';
 import { calculateVolumeProfile } from '../lib/volumeProfile';
 
-const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns }) => {
+const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns, showGrid }) => {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const candleRef = useRef(null);
@@ -106,6 +106,18 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
       seriesMarkersRef.current = null;
     };
   }, []);
+
+  // ─── Update Grid Lines Option ───────────────────────────────────────────────
+  useEffect(() => {
+    if (chartRef.current) {
+      chartRef.current.applyOptions({
+        grid: {
+          vertLines: { visible: showGrid ?? false, color: 'rgba(42,46,57,0.2)' },
+          horzLines: { visible: showGrid ?? false, color: 'rgba(42,46,57,0.2)' },
+        }
+      });
+    }
+  }, [showGrid]);
 
   // ─── Rebuild all series when data or indicators change ──────────────────────
   useEffect(() => {

@@ -16,11 +16,18 @@ const TradeFeed = ({ trades = [] }) => {
                 <span className="font-black text-sm text-[#d1d4dc] tracking-tighter">{trade.symbol}</span>
                 <div className="text-[8px] text-[#5d606b] uppercase font-bold tracking-widest mt-0.5">SMC_ALGO_VECTOR</div>
               </div>
-              <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${
-                trade.type === 'LONG' ? 'bg-[#39ff14]/10 text-[#39ff14]' : 'bg-[#ff003c]/10 text-[#ff003c]'
-              }`}>
-                {trade.type}
-              </span>
+              <div className="flex flex-col items-end gap-1">
+                <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${
+                  trade.type === 'LONG' ? 'bg-[#39ff14]/10 text-[#39ff14]' : 'bg-[#ff003c]/10 text-[#ff003c]'
+                }`}>
+                  {trade.type}
+                </span>
+                {trade.time && (
+                  <span className="text-[8px] text-[#848e9c] font-mono tracking-widest">
+                    {new Date(trade.time * 1000).toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2 text-[10px] font-mono-elite mb-4">

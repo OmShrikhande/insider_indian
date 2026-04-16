@@ -1,19 +1,73 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, memo, useCallback, useMemo } from 'react';
 import apiService from '../services/apiService';
+
+// Memoized item to prevent 300+ rerenders when only the selected symbol changes
+const SidebarItem = memo(({ s, selectedSymbol, onSymbolChange, inWatchlist, onToggleWatchlist }) => {
+  return (
+    <button
+      onClick={() => onSymbolChange(s.symbol)}
+      className={`w-full text-left px-4 py-3 rounded-lg transition-all flex items-center justify-between group relative overflow-hidden elite-sidebar-item ${
+        selectedSymbol === s.symbol
+          ? 'bg-[#00f2ff]/10 text-[#00f2ff] border-l-2 border-l-[#00f2ff]'
+          : 'text-[#848e9c] hover:bg-white/5 hover:text-[#d1d4dc]'
+      }`}
+    >
+      <div className="flex flex-col">
+        <span className="font-mono font-bold tracking-tight text-xs">{s.symbol}</span>
+        <span className="text-[8px] text-[#5d606b] uppercase tracking-tighter">NSE_INDEX</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="flex flex-col items-end">
+            <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded-sm ${
+              selectedSymbol === s.symbol ? 'bg-[#00f2ff]/20 text-[#00f2ff]' : 'bg-[#1c2127] text-[#555]'
+            }`}>
+              {s.in_hourly || s.in_daily ? 'REC' : 'SYS'}
+            </span>
+        </div>
+        <div 
+          onClick={(e) => onToggleWatchlist(e, s.symbol)}
+          className={`cursor-pointer text-[14px] transition-colors ${
+             inWatchlist ? 'text-[#ffea00] hover:text-[#ffd600] drop-shadow-[0_0_5px_#ffea00aa]' : 'text-[#333] hover:text-[#848e9c]'
+          }`}
+        >
+          {inWatchlist ? '★' : '☆'}
+        </div>
+      </div>
+    </button>
+  );
+});
+// Need a display name for debug
+SidebarItem.displayName = 'SidebarItem';
+
 
 const Sidebar = ({ selectedSymbol, onSymbolChange }) => {
   const [symbols, setSymbols] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState('all'); // 'all' | 'watchlist'
+  const [watchlist, setWatchlist] = useState([]);
+  
+  // Fetch watchlist from backend
+  useEffect(() => {
+    const fetchWatchlist = async () => {
+      try {
+        const response = await apiService.getWatchlist();
+        if (response.success && Array.isArray(response.data)) {
+          setWatchlist(response.data);
+        }
+      } catch (err) {
+        console.error('Failed to load watchlist:', err);
+      }
+    };
+    fetchWatchlist();
+  }, []);
 
   useEffect(() => {
     const fetchTopSymbols = async () => {
       try {
         setLoading(true);
-        // Default top symbols if search is empty
         const response = await apiService.searchSymbols('');
         if (response) {
-          // Backward compatibility for different response structures
           const data = Array.isArray(response) ? response : (response.data || []);
           setSymbols(data);
         }
@@ -38,17 +92,47 @@ const Sidebar = ({ selectedSymbol, onSymbolChange }) => {
       } catch (err) {
         console.error('Search failed', err);
       }
+    } else {
+      // Refresh default if cleared
+      const response = await apiService.searchSymbols('');
+      if (response) {
+        const data = Array.isArray(response) ? response : (response.data || []);
+        setSymbols(data);
+      }
     }
   };
+
+  const handleToggleWatchlist = async (e, symbol) => {
+    e.stopPropagation(); // prevent selecting the stock when clicking star
+    try {
+      const response = await apiService.toggleWatchlist(symbol);
+      if (response.success) {
+        setWatchlist(prev => 
+          response.action === 'added'
+            ? [...prev, symbol]
+            : prev.filter(s => s !== symbol)
+        );
+      }
+    } catch (err) {
+      console.error('Failed to toggle watchlist:', err);
+    }
+  };
+
+  const displayedSymbols = useMemo(() => {
+    if (viewMode === 'watchlist') {
+      return symbols.filter(s => watchlist.includes(s.symbol));
+    }
+    return symbols;
+  }, [symbols, viewMode, watchlist]);
 
   return (
     <div className="w-64 elite-panel border-r border-[#1c2127] flex flex-col h-full bg-[#000000]">
       <div className="p-4 border-b border-[#1c2127]">
         <h2 className="text-[10px] uppercase font-bold tracking-[0.2em] text-[#00f2ff] mb-4 flex items-center gap-2">
             <span className="w-1.5 h-1.5 bg-[#00f2ff] rounded-full shadow-[0_0_8px_#00f2ff]"></span>
-            Elite_Scan / Node 01
+            Roxey_Scan / Node 01
         </h2>
-        <div className="relative">
+        <div className="relative mb-3">
           <input
             type="text"
             placeholder="TYPE SYMBOL_ (/)"
@@ -59,44 +143,51 @@ const Sidebar = ({ selectedSymbol, onSymbolChange }) => {
             autoComplete="off"
           />
         </div>
+
+        {/* View Mode Toggle */}
+        <div className="flex gap-2">
+          <button 
+            onClick={() => setViewMode('all')}
+            className={`flex-1 py-1 text-[8px] font-bold uppercase rounded border transition-all ${
+              viewMode === 'all' ? 'bg-[#00f2ff]/10 border-[#00f2ff] text-[#00f2ff]' : 'bg-transparent border-[#1c2127] text-[#5d606b]'
+            }`}
+          >
+            All_Intel
+          </button>
+          <button 
+            onClick={() => setViewMode('watchlist')}
+            className={`flex-1 py-1 text-[8px] font-bold uppercase rounded border transition-all ${
+              viewMode === 'watchlist' ? 'bg-[#ffea00]/10 border-[#ffea00] text-[#ffea00]' : 'bg-transparent border-[#1c2127] text-[#5d606b]'
+            }`}
+          >
+            Watchlist
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar px-2 py-4">
         <div className="space-y-1">
-          <h3 className="text-[9px] uppercase tracking-widest text-[#5d606b] px-3 mb-3 font-bold">Watchlist_Alpha</h3>
           {loading && (
             <div className="px-4 py-8 flex flex-col items-center gap-3">
               <div className="w-4 h-4 border border-[#00f2ff] border-t-transparent rounded-full animate-spin"></div>
               <span className="text-[9px] text-[#5d606b] uppercase animate-pulse font-mono">Syncing_Protocol...</span>
             </div>
           )}
-          {!loading && symbols.length === 0 && (
+          {!loading && displayedSymbols.length === 0 && (
             <div className="px-4 py-8 text-center text-[#1c2127] text-[10px] uppercase font-mono">
               [ NO_INTEL_FOUND ]
             </div>
           )}
-          {symbols.map((s) => (
-            <button
+          
+          {displayedSymbols.map((s) => (
+            <SidebarItem
               key={s.symbol}
-              onClick={() => onSymbolChange(s.symbol)}
-              className={`w-full text-left px-4 py-3 rounded-lg transition-all flex items-center justify-between group relative overflow-hidden elite-sidebar-item ${
-                selectedSymbol === s.symbol
-                  ? 'bg-[#00f2ff]/10 text-[#00f2ff] border-l-2 border-l-[#00f2ff]'
-                  : 'text-[#848e9c] hover:bg-white/5 hover:text-[#d1d4dc]'
-              }`}
-            >
-              <div className="flex flex-col">
-                <span className="font-mono font-bold tracking-tight text-xs">{s.symbol}</span>
-                <span className="text-[8px] text-[#5d606b] uppercase tracking-tighter">NSE_INDEX / BAR {Math.floor(Math.random() * 999)}</span>
-              </div>
-              <div className="flex flex-col items-end">
-                  <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded-sm ${
-                    selectedSymbol === s.symbol ? 'bg-[#00f2ff]/20 text-[#00f2ff]' : 'bg-[#1c2127] text-[#555]'
-                  }`}>
-                    {s.in_hourly ? 'H' : ''}{s.in_daily ? 'D' : ''}
-                  </span>
-              </div>
-            </button>
+              s={s}
+              selectedSymbol={selectedSymbol}
+              onSymbolChange={onSymbolChange}
+              inWatchlist={watchlist.includes(s.symbol)}
+              onToggleWatchlist={handleToggleWatchlist}
+            />
           ))}
         </div>
       </div>

@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import apiService from '../services/apiService';
 
-const NewsList = () => {
+const NewsList = ({ selectedSymbol }) => {
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('desc');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [showSpecificStockNews, setShowSpecificStockNews] = useState(true);
 
   // Debounce search
   useEffect(() => {
@@ -19,16 +20,23 @@ const NewsList = () => {
   const fetchNews = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await apiService.getLatestNews(debouncedSearch, sort);
+      const query = showSpecificStockNews && selectedSymbol 
+        ? `${selectedSymbol} ${debouncedSearch}`.trim() 
+        : debouncedSearch;
+
+      const response = await apiService.getLatestNews(query, sort);
       if (response.success) {
         setNews(response.data);
+      } else if (Array.isArray(response)) {
+        // Fallback for mock data direct array return
+        setNews(response);
       }
     } catch (err) {
       console.error('Failed to fetch news', err);
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, sort]);
+  }, [debouncedSearch, sort, showSpecificStockNews, selectedSymbol]);
 
   useEffect(() => {
     fetchNews();
@@ -56,11 +64,20 @@ const NewsList = () => {
           />
         </div>
 
-        {/* Sort Filter */}
+        {/* Filters */}
         <div className="flex gap-2">
             <button 
-              onClick={() => setSort('desc')}
-              className={`flex-1 py-1 text-[8px] font-bold uppercase rounded border transition-all ${
+              onClick={() => setShowSpecificStockNews(prev => !prev)}
+              className={`whitespace-nowrap px-2 py-1 text-[8px] font-bold uppercase rounded border transition-all ${
+                showSpecificStockNews ? 'bg-[#00f2ff]/10 border-[#00f2ff] text-[#00f2ff]' : 'bg-transparent border-[#1c2127] text-[#5d606b]'
+              }`}
+            >
+              {selectedSymbol} Only
+            </button>
+            <div className="flex-1 flex gap-2">
+              <button 
+                onClick={() => setSort('desc')}
+                className={`flex-1 py-1 text-[8px] font-bold uppercase rounded border transition-all ${
                 sort === 'desc' ? 'bg-[#00f2ff]/10 border-[#00f2ff] text-[#00f2ff]' : 'bg-transparent border-[#1c2127] text-[#5d606b]'
               }`}
             >
@@ -74,6 +91,7 @@ const NewsList = () => {
             >
               Oldest
             </button>
+            </div>
         </div>
       </div>
 

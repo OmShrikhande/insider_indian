@@ -98,6 +98,7 @@ export const detectSMC = (data) => {
       entry,
       target,
       stopLoss,
+      time: ob.time,
       range: {
         min: Math.min(entry, target, stopLoss),
         max: Math.max(entry, target, stopLoss),

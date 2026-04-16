@@ -9,9 +9,16 @@ class ApiService {
   async request(endpoint, options = {}) {
     const url = `${this.baseURL}${endpoint}`;
 
+    let token = null;
+    try {
+      const stored = localStorage.getItem('roxey_token');
+      if (stored) token = JSON.parse(stored).token;
+    } catch (e) {}
+
     const config = {
       headers: {
         'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         ...options.headers,
       },
       ...options,
@@ -65,6 +72,18 @@ class ApiService {
   // Health check
   async healthCheck() {
     return this.request('/health');
+  }
+
+  // --- Watchlist Methods ---
+  async getWatchlist() {
+    return this.request('/api/watchlist');
+  }
+
+  async toggleWatchlist(symbol) {
+    return this.request('/api/watchlist/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ symbol })
+    });
   }
 }
 

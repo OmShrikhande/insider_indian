@@ -7,6 +7,8 @@ import NewsList from './NewsList';
 import TradeFeed from './TradeFeed';
 import IndicatorPanel from './IndicatorPanel';
 import PatternPanel from './PatternPanel';
+import AuthModal from './AuthModal';
+import authService from '../services/authService';
 import { INDICATORS } from '../lib/indicatorRegistry';
 import { DEFAULT_PATTERNS } from '../lib/patternRegistry';
 import { detectSMC } from '../lib/smc';
@@ -21,6 +23,8 @@ const Dashboard = () => {
   const [activeRightPanel, setActiveRightPanel] = useState('news');
   const [activeIndicators, setActiveIndicators] = useState(buildDefaultIndicators);
   const [activePatterns, setActivePatterns] = useState({ ...DEFAULT_PATTERNS });
+  const [showGrid, setShowGrid] = useState(false);
+  const [currentUser, setCurrentUser] = useState(authService.getCurrentUser());
   const { data, news, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
   const [smcData, setSmcData] = useState({ suggestions: [] });
 
@@ -46,6 +50,15 @@ const Dashboard = () => {
 
   const activeIndicatorCount = Object.values(activeIndicators).filter(Boolean).length;
   const activePatternCount  = Object.values(activePatterns).filter(Boolean).length;
+
+  if (!currentUser) {
+    return <AuthModal onLoginSuccess={setCurrentUser} />;
+  }
+
+  const handleLogout = () => {
+    authService.logout();
+    setCurrentUser(null);
+  };
 
   return (
     <div className="flex h-screen overflow-hidden elite-dashboard font-mono-elite">
@@ -78,10 +91,26 @@ const Dashboard = () => {
 
           <div className="w-px h-8 bg-[#1c2127]/50" />
 
-          {/* Indicator & Pattern toggle buttons */}
+          {/* Indicator, Pattern & Grid toggle buttons */}
           <div className="flex items-center gap-2">
             <IndicatorPanel activeIndicators={activeIndicators} onToggle={(id, val) => setActiveIndicators(prev => ({ ...prev, [id]: val }))} />
             <PatternPanel activePatterns={activePatterns} onToggle={(id, val) => setActivePatterns(prev => ({ ...prev, [id]: val }))} />
+            <div className="w-px h-6 bg-[#1c2127] mx-1" />
+            <button
+              onClick={() => setShowGrid(prev => !prev)}
+              className={`h-8 px-3 rounded flex items-center justify-center transition-all ${
+                showGrid ? 'bg-[#ff003c] text-white shadow-[0_0_10px_#ff003c44]' : 'bg-[#1c2127] text-[#848e9c] hover:bg-[#2a303c]'
+              }`}
+              title="Toggle Grid Lines"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <line x1="3" y1="9" x2="21" y2="9"/>
+                <line x1="3" y1="15" x2="21" y2="15"/>
+                <line x1="9" y1="3" x2="9" y2="21"/>
+                <line x1="15" y1="3" x2="15" y2="21"/>
+              </svg>
+            </button>
           </div>
 
           {/* Spacer */}
@@ -137,7 +166,7 @@ const Dashboard = () => {
                   onClick={() => window.location.reload()}
                   className="w-full py-4 elite-button text-[#ff003c] border-[#ff003c33] rounded-lg tracking-widest text-[10px]"
                 >
-                  REBOOT_SYSTEM_
+                  REBOOT_ROXEY_
                 </button>
               </div>
             </div>
@@ -160,6 +189,7 @@ const Dashboard = () => {
               symbol={selectedSymbol}
               activeIndicators={activeIndicators}
               activePatterns={activePatterns}
+              showGrid={showGrid}
             />
           )}
         </div>
@@ -175,8 +205,9 @@ const Dashboard = () => {
             <span>BUFFER: {Math.floor(data.length / 10)}MB</span>
           </div>
           <div className="flex gap-6 items-center">
-            <span className="text-[#5d606b]">{new Date().toISOString().replace('T', '_').slice(0, 19)}</span>
-            <span className="text-[#00f2ff] font-bold bg-[#00f2ff]/5 px-2 py-0.5 rounded">ELITE_EDITION_V7.2</span>
+            <span className="text-[#5d606b]">OP: {currentUser.username}</span>
+            <button onClick={handleLogout} className="text-[#ff003c] hover:text-[#ff4d79] transition-colors">DISCONNECT</button>
+            <span className="text-[#00f2ff] font-bold bg-[#00f2ff]/5 px-2 py-0.5 rounded">ROXEY_EDITION_V7.2</span>
           </div>
         </div>
       </div>
@@ -201,7 +232,7 @@ const Dashboard = () => {
         </div>
         <div className="flex-1 overflow-hidden">
           {activeRightPanel === 'news' ? (
-            <NewsList /> 
+            <NewsList selectedSymbol={selectedSymbol} /> 
           ) : (
             <TradeFeed trades={smcData.suggestions} />
           )}
