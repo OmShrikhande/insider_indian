@@ -30,6 +30,17 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
   const [currentLine, setCurrentLine] = useState(null); // { start: { time, price }, end: { time, price } }
   const [currentBox, setCurrentBox] = useState(null); // { start: { time, price }, end: { time, price } }
   const [vpProfile, setVpProfile] = useState(null);
+  const getTimeCoordinate = useCallback((time) => {
+    const timeScale = chartRef.current?.timeScale?.();
+    if (!timeScale || typeof timeScale.timeToCoordinate !== 'function') return null;
+    return timeScale.timeToCoordinate(time);
+  }, []);
+
+  const getPriceCoordinate = useCallback((price) => {
+    const priceScale = chartRef.current?.priceScale?.('right');
+    if (!priceScale || typeof priceScale.priceToCoordinate !== 'function') return null;
+    return priceScale.priceToCoordinate(price);
+  }, []);
 
   // ─── Init chart once ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -582,7 +593,8 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
         {vpProfile && chartRef.current && (
            <g opacity="0.4">
               {vpProfile.profile.map((p, i) => {
-                const y = chartRef.current.priceScale('right').priceToCoordinate(p.value);
+                const y = getPriceCoordinate(p.value);
+                if (y == null) return null;
                 const barWidth = (p.volume / vpProfile.maxVolume) * 120; // Max 120px width
                 return (
                   <rect 
@@ -602,10 +614,10 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
            <g key={idx}>
               {draw.type === 'trend' && (
                 <line 
-                  x1={chartRef.current?.timeScale().timeToCoordinate(draw.start.time)}
-                  y1={chartRef.current?.priceScale('right').priceToCoordinate(draw.start.price)}
-                  x2={chartRef.current?.timeScale().timeToCoordinate(draw.end.time)}
-                  y2={chartRef.current?.priceScale('right').priceToCoordinate(draw.end.price)}
+                  x1={getTimeCoordinate(draw.start.time)}
+                  y1={getPriceCoordinate(draw.start.price)}
+                  x2={getTimeCoordinate(draw.end.time)}
+                  y2={getPriceCoordinate(draw.end.price)}
                   stroke="rgba(0,242,255,0.7)" strokeWidth="1.5" 
                 />
               )}
@@ -662,8 +674,8 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
               {draw.type === 'hline' && (
                 <line 
                   x1="0" x2="100%"
-                  y1={chartRef.current?.priceScale('right').priceToCoordinate(draw.price)}
-                  y2={chartRef.current?.priceScale('right').priceToCoordinate(draw.price)}
+                  y1={getPriceCoordinate(draw.price)}
+                  y2={getPriceCoordinate(draw.price)}
                   stroke="rgba(0,242,255,0.4)" strokeWidth="1" strokeDasharray="2 2"
                 />
               )}
@@ -672,19 +684,19 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
         {/* Partial previews */}
         {currentLine && (
           <line 
-            x1={chartRef.current?.timeScale().timeToCoordinate(currentLine.start.time)}
-            y1={chartRef.current?.priceScale('right').priceToCoordinate(currentLine.start.price)}
-            x2={chartRef.current?.timeScale().timeToCoordinate(currentLine.end.time)}
-            y2={chartRef.current?.priceScale('right').priceToCoordinate(currentLine.end.price)}
+            x1={getTimeCoordinate(currentLine.start.time)}
+            y1={getPriceCoordinate(currentLine.start.price)}
+            x2={getTimeCoordinate(currentLine.end.time)}
+            y2={getPriceCoordinate(currentLine.end.price)}
             stroke="rgba(0,242,255,0.5)" strokeWidth="1.5" strokeDasharray="4 4"
           />
         )}
         {currentBox && (
           <rect 
-            x={Math.min(chartRef.current?.timeScale().timeToCoordinate(currentBox.start.time), chartRef.current?.timeScale().timeToCoordinate(currentBox.end.time))}
-            y={Math.min(chartRef.current?.priceScale('right').priceToCoordinate(currentBox.start.price), chartRef.current?.priceScale('right').priceToCoordinate(currentBox.end.price))}
-            width={Math.abs(chartRef.current?.timeScale().timeToCoordinate(currentBox.start.time) - chartRef.current?.timeScale().timeToCoordinate(currentBox.end.time))}
-            height={Math.abs(chartRef.current?.priceScale('right').priceToCoordinate(currentBox.start.price) - chartRef.current?.priceScale('right').priceToCoordinate(currentBox.end.price))}
+            x={Math.min(getTimeCoordinate(currentBox.start.time) ?? 0, getTimeCoordinate(currentBox.end.time) ?? 0)}
+            y={Math.min(getPriceCoordinate(currentBox.start.price) ?? 0, getPriceCoordinate(currentBox.end.price) ?? 0)}
+            width={Math.abs((getTimeCoordinate(currentBox.start.time) ?? 0) - (getTimeCoordinate(currentBox.end.time) ?? 0))}
+            height={Math.abs((getPriceCoordinate(currentBox.start.price) ?? 0) - (getPriceCoordinate(currentBox.end.price) ?? 0))}
             fill="rgba(0,242,255,0.1)" stroke="rgba(0,242,255,0.2)" strokeDasharray="4 4"
           />
         )}
@@ -695,10 +707,10 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
         <div className="absolute inset-0 pointer-events-none z-30">
            <svg className="w-full h-full">
               <line 
-                x1={chartRef.current?.timeScale().timeToCoordinate(rulerState.start.time)}
-                y1={chartRef.current?.priceScale('right').priceToCoordinate(rulerState.start.price)}
-                x2={chartRef.current?.timeScale().timeToCoordinate(rulerState.end.time)}
-                y2={chartRef.current?.priceScale('right').priceToCoordinate(rulerState.end.price)}
+                x1={getTimeCoordinate(rulerState.start.time)}
+                y1={getPriceCoordinate(rulerState.start.price)}
+                x2={getTimeCoordinate(rulerState.end.time)}
+                y2={getPriceCoordinate(rulerState.end.price)}
                 stroke="#39ff14"
                 strokeWidth="1.5"
                 strokeDasharray="4 4"
@@ -709,8 +721,8 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
              <div 
                style={{ 
                  position: 'absolute', 
-                 left: chartRef.current.timeScale().timeToCoordinate(rulerState.end.time) + 10,
-                 top: chartRef.current.priceScale('right').priceToCoordinate(rulerState.end.price) - 10,
+                 left: (getTimeCoordinate(rulerState.end.time) ?? 0) + 10,
+                 top: (getPriceCoordinate(rulerState.end.price) ?? 0) - 10,
                  background: '#39ff14', color: '#000', padding: '2px 6px', borderRadius: 4,
                  fontSize: 10, fontWeight: 700, fontFamily: 'monospace'
                }}

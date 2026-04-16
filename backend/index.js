@@ -9,6 +9,7 @@ const marketService = require('./services/marketService');
 const stockRoutes = require('./routes/stocks');
 const authRoutes = require('./routes/auth');
 const watchlistRoutes = require('./routes/watchlist');
+const fnoRoutes = require('./routes/fno');
 
 const app = express();
 
@@ -48,6 +49,7 @@ app.get('/health', (req, res) => {
 app.use('/api/stocks', stockRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/watchlist', watchlistRoutes);
+app.use('/api/fno', fnoRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -81,7 +83,22 @@ async function setupDatabase() {
       `CREATE TABLE IF NOT EXISTS stocks_daily (date DateTime, open Float64, high Float64, low Float64, close Float64, volume UInt64, symbol String, timeframe String, sector String) ENGINE = MergeTree() ORDER BY (symbol, date)`,
       `CREATE TABLE IF NOT EXISTS news (id String, title String, summary String, timestamp DateTime, source String, url String, sentiment String) ENGINE = MergeTree() ORDER BY timestamp`,
       `CREATE TABLE IF NOT EXISTS users (id String, username String, password_hash String, created_at DateTime DEFAULT now()) ENGINE = MergeTree() ORDER BY username`,
-      `CREATE TABLE IF NOT EXISTS watchlists (user_id String, symbol String, created_at DateTime DEFAULT now()) ENGINE = MergeTree() ORDER BY (user_id, symbol)`
+      `CREATE TABLE IF NOT EXISTS watchlists (user_id String, symbol String, created_at DateTime DEFAULT now()) ENGINE = MergeTree() ORDER BY (user_id, symbol)`,
+      `CREATE TABLE IF NOT EXISTS fno_contracts (
+        instrument_key String,
+        trading_symbol String,
+        name String,
+        segment String,
+        exchange String,
+        instrument_type String,
+        lot_size UInt32,
+        tick_size Float64,
+        expiry Nullable(Date),
+        strike Nullable(Float64),
+        option_type Nullable(String),
+        underlying_symbol String,
+        updated_at DateTime
+      ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (instrument_key, trading_symbol)`
     ];
 
     for (const query of createQueries) {

@@ -8,6 +8,7 @@ import TradeFeed from './TradeFeed';
 import IndicatorPanel from './IndicatorPanel';
 import PatternPanel from './PatternPanel';
 import AuthModal from './AuthModal';
+import ChartErrorBoundary from './ChartErrorBoundary';
 import authService from '../services/authService';
 import { INDICATORS } from '../lib/indicatorRegistry';
 import { DEFAULT_PATTERNS } from '../lib/patternRegistry';
@@ -24,6 +25,8 @@ const Dashboard = () => {
   const [activeIndicators, setActiveIndicators] = useState(buildDefaultIndicators);
   const [activePatterns, setActivePatterns] = useState({ ...DEFAULT_PATTERNS });
   const [showGrid, setShowGrid] = useState(false);
+  const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
+  const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
   const [currentUser, setCurrentUser] = useState(authService.getCurrentUser());
   const { data, news, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
   const [smcData, setSmcData] = useState({ suggestions: [] });
@@ -38,6 +41,31 @@ const Dashboard = () => {
   // Global "Type to search" shortcut
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (e.ctrlKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setIsLeftSidebarCollapsed((prev) => !prev);
+        return;
+      }
+      if (e.ctrlKey && e.key.toLowerCase() === 'i') {
+        e.preventDefault();
+        setIsRightSidebarCollapsed((prev) => !prev);
+        return;
+      }
+      if (e.key.toLowerCase() === 'g' && !e.ctrlKey) {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+        setShowGrid((prev) => !prev);
+        return;
+      }
+      if (e.key.toLowerCase() === 'n' && !e.ctrlKey) {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+        setActiveRightPanel('news');
+        return;
+      }
+      if (e.key.toLowerCase() === 't' && !e.ctrlKey) {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+        setActiveRightPanel('trades');
+        return;
+      }
       if (e.key === '/' || (e.key.length === 1 && /[a-zA-Z]/.test(e.key))) {
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
         if (e.key === '/') e.preventDefault();
@@ -64,13 +92,18 @@ const Dashboard = () => {
     <div className="flex h-screen overflow-hidden elite-dashboard font-mono-elite">
 
       {/* ── Sidebar ──────────────────────────────────────────────────────── */}
-      <Sidebar selectedSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol} />
+      <Sidebar
+        selectedSymbol={selectedSymbol}
+        onSymbolChange={setSelectedSymbol}
+        isCollapsed={isLeftSidebarCollapsed}
+        onToggleCollapse={() => setIsLeftSidebarCollapsed((prev) => !prev)}
+      />
 
       {/* ── Main Column ──────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0 border-r border-[#1c2127]">
 
         {/* Top Bar — Elite Transparent System */}
-        <div className="h-16 flex-shrink-0 bg-black/60 backdrop-blur-xl border-b border-[#1c2127]/50 flex items-center gap-6 px-6 relative z-[100]">
+        <div className="h-16 flex-shrink-0 bg-black/60 backdrop-blur-xl border-b border-[#1c2127]/50 flex items-center gap-6 px-6 relative z-[100] overflow-visible">
 
           {/* Symbol info */}
           <div className="flex flex-col">
@@ -183,14 +216,16 @@ const Dashboard = () => {
 
           {/* The Chart */}
           {!loading && !error && data.length > 0 && (
-            <CandlestickChart
-              data={data}
-              news={news}
-              symbol={selectedSymbol}
-              activeIndicators={activeIndicators}
-              activePatterns={activePatterns}
-              showGrid={showGrid}
-            />
+            <ChartErrorBoundary>
+              <CandlestickChart
+                data={data}
+                news={news}
+                symbol={selectedSymbol}
+                activeIndicators={activeIndicators}
+                activePatterns={activePatterns}
+                showGrid={showGrid}
+              />
+            </ChartErrorBoundary>
           )}
         </div>
 
@@ -214,9 +249,16 @@ const Dashboard = () => {
 
 
       {/* ── Right Intelligence Panel ──────────────────────────────────────── */}
-      <div className="w-72 flex-shrink-0 flex flex-col bg-black border-l border-[#1c2127]">
+      <div className={`${isRightSidebarCollapsed ? 'w-12' : 'w-72'} flex-shrink-0 flex flex-col bg-black border-l border-[#1c2127] transition-all duration-200`}>
         <div className="flex border-b border-[#1c2127] flex-shrink-0 bg-[#050505]">
-          {['news', 'trades'].map(panel => (
+          <button
+            onClick={() => setIsRightSidebarCollapsed((prev) => !prev)}
+            className="px-2 text-[#848e9c] hover:text-[#00f2ff] transition-colors"
+            title={isRightSidebarCollapsed ? 'Expand intelligence panel (Ctrl+I)' : 'Collapse intelligence panel (Ctrl+I)'}
+          >
+            {isRightSidebarCollapsed ? '«' : '»'}
+          </button>
+          {!isRightSidebarCollapsed && ['news', 'trades'].map(panel => (
             <button
               key={panel}
               onClick={() => setActiveRightPanel(panel)}
@@ -230,13 +272,13 @@ const Dashboard = () => {
             </button>
           ))}
         </div>
-        <div className="flex-1 overflow-hidden">
+        {!isRightSidebarCollapsed && <div className="flex-1 overflow-hidden">
           {activeRightPanel === 'news' ? (
             <NewsList selectedSymbol={selectedSymbol} /> 
           ) : (
             <TradeFeed trades={smcData.suggestions} />
           )}
-        </div>
+        </div>}
       </div>
 
 

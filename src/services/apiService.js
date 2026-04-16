@@ -85,6 +85,18 @@ class ApiService {
       body: JSON.stringify({ symbol })
     });
   }
+
+  // --- FNO Methods ---
+  async getFnoContracts(query = '', limit = 100) {
+    return this.request(`/api/fno/contracts?q=${encodeURIComponent(query)}&limit=${limit}`);
+  }
+
+  async syncFnoContracts(query = 'NIFTY', limit = 100) {
+    return this.request('/api/fno/sync', {
+      method: 'POST',
+      body: JSON.stringify({ q: query, limit })
+    });
+  }
 }
 
 export default new ApiService();
