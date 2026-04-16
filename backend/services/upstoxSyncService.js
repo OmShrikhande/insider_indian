@@ -282,10 +282,8 @@ class UpstoxSyncService {
 
       if (!timestampMs || Number.isNaN(timestampMs)) return null;
 
-      // Upstox timestamps are in IST, convert to UTC for storage
-      // Subtract 5.5 hours to convert IST to UTC
-      const utcTimestampMs = timestampMs - (5.5 * 60 * 60 * 1000);
-      const candleDate = new Date(utcTimestampMs);
+      // Keep upstream timestamp as-is to avoid accidental timezone double-shifts.
+      const candleDate = new Date(timestampMs);
 
       return {
         date: this.formatDateTime(candleDate),

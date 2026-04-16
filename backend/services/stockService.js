@@ -2,6 +2,48 @@ const { client } = require('../config/database');
 const marketService = require('./marketService');
 
 class StockService {
+  parseDateUTC(value) {
+    if (value instanceof Date) return value;
+    if (typeof value === 'string' && !value.endsWith('Z')) {
+      return new Date(`${value}Z`);
+    }
+    return new Date(value);
+  }
+
+  toISTDateParts(date) {
+    const ist = new Date(this.parseDateUTC(date).getTime() + (5.5 * 60 * 60 * 1000));
+    return {
+      day: ist.getUTCDay(),
+      hour: ist.getUTCHours(),
+      minute: ist.getUTCMinutes(),
+      date: ist.toISOString().slice(0, 10),
+    };
+  }
+
+  isMarketSessionTime(date) {
+    const { hour, minute } = this.toISTDateParts(date);
+    const totalMinutes = hour * 60 + minute;
+    return totalMinutes >= (9 * 60) && totalMinutes <= (15 * 60 + 30);
+  }
+
+  async applyTradingFilters(data, timeframe) {
+    const holidays = await marketService.getHolidays();
+    const holidaySet = new Set(
+      holidays
+        .filter((h) => (h.closedExchanges || []).includes('NSE') || h.type === 'TRADING_HOLIDAY')
+        .map((h) => h.date)
+    );
+
+    const intraday = timeframe !== '1d';
+    return data.filter((row) => {
+      const date = this.parseDateUTC(row.date);
+      const ist = this.toISTDateParts(date);
+      if (ist.day === 0 || ist.day === 6) return false;
+      if (holidaySet.has(ist.date)) return false;
+      if (intraday && !this.isMarketSessionTime(date)) return false;
+      return true;
+    });
+  }
   /**
    * Get stock data by symbol and timeframe
    * @param {string} symbol - Stock symbol (e.g., 'AAPL')
@@ -59,32 +101,12 @@ class StockService {
 
       let data = await result.json();
 
-      // Get holidays for filtering
-      const holidays = await marketService.getHolidays();
-
-      // Filter out weekend and holiday data
-      data = data.filter(row => {
-        const date = new Date(row.date);
-        const dayOfWeek = date.getDay();
-
-        // Exclude weekends
-        if (dayOfWeek === 0 || dayOfWeek === 6) return false;
-
-        // Exclude holidays
-        const dateStr = date.toISOString().split('T')[0];
-        const isHoliday = holidays.some(holiday =>
-          holiday.date === dateStr &&
-          (holiday.closedExchanges.includes('NSE') || holiday.type === 'TRADING_HOLIDAY')
-        );
-        if (isHoliday) return false;
-
-        return true;
-      });
+      data = await this.applyTradingFilters(data, queryTimeframe);
 
       // Remove duplicates by timestamp, keeping the last occurrence
       const seen = new Set();
       data = data.filter(row => {
-        const timestamp = Math.floor(new Date(row.date).getTime() / 1000);
+        const timestamp = Math.floor(this.parseDateUTC(row.date).getTime() / 1000);
         if (seen.has(timestamp)) {
           return false;
         }
@@ -95,7 +117,7 @@ class StockService {
       // Reverse back to chronological order and transform for frontend
       return data.reverse().map(row => ({
         // Using the 'date' column which contains full ISO DateTime string
-        time: Math.floor(new Date(row.date).getTime() / 1000),
+        time: Math.floor(this.parseDateUTC(row.date).getTime() / 1000),
         open: parseFloat(row.open),
         high: parseFloat(row.high),
         low: parseFloat(row.low),
@@ -246,32 +268,12 @@ class StockService {
 
       let data = await result.json();
 
-      // Get holidays for filtering
-      const holidays = await marketService.getHolidays();
-
-      // Filter out weekend and holiday data
-      data = data.filter(row => {
-        const date = new Date(row.date);
-        const dayOfWeek = date.getDay();
-
-        // Exclude weekends
-        if (dayOfWeek === 0 || dayOfWeek === 6) return false;
-
-        // Exclude holidays
-        const dateStr = date.toISOString().split('T')[0];
-        const isHoliday = holidays.some(holiday =>
-          holiday.date === dateStr &&
-          (holiday.closedExchanges.includes('NSE') || holiday.type === 'TRADING_HOLIDAY')
-        );
-        if (isHoliday) return false;
-
-        return true;
-      });
+      data = await this.applyTradingFilters(data, timeframe);
 
       // Remove duplicates by timestamp, keeping the last occurrence
       const seen = new Set();
       data = data.filter(row => {
-        const timestamp = Math.floor(new Date(row.date).getTime() / 1000);
+        const timestamp = Math.floor(this.parseDateUTC(row.date).getTime() / 1000);
         if (seen.has(timestamp)) {
           return false;
         }
@@ -280,7 +282,7 @@ class StockService {
       });
 
       return data.map(row => ({
-        time: Math.floor(new Date(row.date).getTime() / 1000),
+        time: Math.floor(this.parseDateUTC(row.date).getTime() / 1000),
         open: parseFloat(row.open),
         high: parseFloat(row.high),
         low: parseFloat(row.low),

@@ -6,10 +6,18 @@ const { client } = require('../config/database');
 
 const router = express.Router();
 
-const generateToken = (id, username) => {
-  return jwt.sign({ id, username }, process.env.JWT_SECRET || 'roxey_super_secret_jwt_key', {
+const generateToken = (id, username, role) => {
+  return jwt.sign({ id, username, role }, process.env.JWT_SECRET || 'roxey_super_secret_jwt_key', {
     expiresIn: '30d',
   });
+};
+
+const resolveRole = (username) => {
+  const admins = String(process.env.ADMIN_USERNAMES || '')
+    .split(',')
+    .map((u) => u.trim().toLowerCase())
+    .filter(Boolean);
+  return admins.includes(String(username).toLowerCase()) ? 'admin' : 'analyst';
 };
 
 router.post('/register', async (req, res) => {
@@ -21,7 +29,8 @@ router.post('/register', async (req, res) => {
 
     // Check if user exists
     const existing = await client.query({
-      query: `SELECT id FROM users WHERE username = '${username}' LIMIT 1`,
+      query: `SELECT id FROM users WHERE username = {username:String} LIMIT 1`,
+      query_params: { username },
       format: 'JSONEachRow'
     });
     const existingData = await existing.json();
@@ -34,10 +43,11 @@ router.post('/register', async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
     const userId = uuidv4();
+    const role = resolveRole(username);
 
     await client.insert({
       table: 'users',
-      values: [{ id: userId, username, password_hash: hashedPassword, created_at: new Date().toISOString().replace('T', ' ').slice(0, 19) }],
+      values: [{ id: userId, username, password_hash: hashedPassword, role, created_at: new Date().toISOString().replace('T', ' ').slice(0, 19) }],
       format: 'JSONEachRow'
     });
 
@@ -46,7 +56,8 @@ router.post('/register', async (req, res) => {
       data: {
         id: userId,
         username,
-        token: generateToken(userId, username)
+        role,
+        token: generateToken(userId, username, role)
       }
     });
   } catch (error) {
@@ -60,7 +71,8 @@ router.post('/login', async (req, res) => {
     const { username, password } = req.body;
 
     const result = await client.query({
-      query: `SELECT id, username, password_hash FROM users WHERE username = '${username}' LIMIT 1`,
+      query: `SELECT id, username, password_hash, role FROM users WHERE username = {username:String} LIMIT 1`,
+      query_params: { username },
       format: 'JSONEachRow'
     });
     const users = await result.json();
@@ -81,7 +93,8 @@ router.post('/login', async (req, res) => {
       data: {
         id: user.id,
         username: user.username,
-        token: generateToken(user.id, user.username)
+        role: user.role || 'analyst',
+        token: generateToken(user.id, user.username, user.role || 'analyst')
       }
     });
   } catch (error) {

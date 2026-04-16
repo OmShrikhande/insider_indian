@@ -4,12 +4,18 @@ const cors = require('cors');
 const { testConnection, client } = require('./config/database');
 const upstoxSyncService = require('./services/upstoxSyncService');
 const marketService = require('./services/marketService');
+const fnoService = require('./services/fnoService');
 
 // Import routes
 const stockRoutes = require('./routes/stocks');
 const authRoutes = require('./routes/auth');
 const watchlistRoutes = require('./routes/watchlist');
 const fnoRoutes = require('./routes/fno');
+const screenerRoutes = require('./routes/screeners');
+const strategyRoutes = require('./routes/strategies');
+const alertRoutes = require('./routes/alerts');
+const systemRoutes = require('./routes/system');
+const liveRoutes = require('./routes/live');
 
 const app = express();
 
@@ -50,6 +56,11 @@ app.use('/api/stocks', stockRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/watchlist', watchlistRoutes);
 app.use('/api/fno', fnoRoutes);
+app.use('/api/screeners', screenerRoutes);
+app.use('/api/strategies', strategyRoutes);
+app.use('/api/alerts', alertRoutes);
+app.use('/api/system', systemRoutes);
+app.use('/api/live', liveRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -82,7 +93,7 @@ async function setupDatabase() {
       `CREATE TABLE IF NOT EXISTS stocks_hourly (date DateTime, open Float64, high Float64, low Float64, close Float64, volume UInt64, symbol String, timeframe String, sector String) ENGINE = MergeTree() ORDER BY (symbol, date)`,
       `CREATE TABLE IF NOT EXISTS stocks_daily (date DateTime, open Float64, high Float64, low Float64, close Float64, volume UInt64, symbol String, timeframe String, sector String) ENGINE = MergeTree() ORDER BY (symbol, date)`,
       `CREATE TABLE IF NOT EXISTS news (id String, title String, summary String, timestamp DateTime, source String, url String, sentiment String) ENGINE = MergeTree() ORDER BY timestamp`,
-      `CREATE TABLE IF NOT EXISTS users (id String, username String, password_hash String, created_at DateTime DEFAULT now()) ENGINE = MergeTree() ORDER BY username`,
+      `CREATE TABLE IF NOT EXISTS users (id String, username String, password_hash String, role String DEFAULT 'analyst', created_at DateTime DEFAULT now()) ENGINE = MergeTree() ORDER BY username`,
       `CREATE TABLE IF NOT EXISTS watchlists (user_id String, symbol String, created_at DateTime DEFAULT now()) ENGINE = MergeTree() ORDER BY (user_id, symbol)`,
       `CREATE TABLE IF NOT EXISTS fno_contracts (
         instrument_key String,
@@ -99,6 +110,32 @@ async function setupDatabase() {
         underlying_symbol String,
         updated_at DateTime
       ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (instrument_key, trading_symbol)`
+      ,
+      `CREATE TABLE IF NOT EXISTS alerts (
+        id String,
+        user_id String,
+        symbol String,
+        condition_type String,
+        threshold Float64,
+        timeframe String,
+        is_active UInt8,
+        created_at DateTime
+      ) ENGINE = MergeTree() ORDER BY (user_id, created_at, id)`,
+      `CREATE TABLE IF NOT EXISTS market_holidays (
+        date Date,
+        description String,
+        type String,
+        closed_exchanges String,
+        open_exchanges String,
+        updated_at DateTime
+      ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (date, type)`,
+      `CREATE TABLE IF NOT EXISTS market_sessions (
+        trading_date Date,
+        exchange String,
+        start_time DateTime,
+        end_time DateTime,
+        updated_at DateTime
+      ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (trading_date, exchange)`
     ];
 
     for (const query of createQueries) {
@@ -180,6 +217,10 @@ const startServer = async () => {
 
     marketService.init().catch((error) => {
       console.error('[MarketService] Failed to initialize:', error.message);
+    });
+
+    fnoService.init().catch((error) => {
+      console.error('[FNO] Failed to initialize:', error.message);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

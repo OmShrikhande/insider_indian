@@ -40,7 +40,7 @@ class ApiService {
   }
 
   // Get stock data for a symbol — fetches all available data by default
-  async getStockData(symbol, timeframe = '1h', limit = 100000) {
+  async getStockData(symbol, timeframe = '1h', limit = 3000) {
     return this.request(`/api/stocks/${symbol}?timeframe=${timeframe}&limit=${limit}`);
   }
 
@@ -95,6 +95,49 @@ class ApiService {
     return this.request('/api/fno/sync', {
       method: 'POST',
       body: JSON.stringify({ q: query, limit })
+    });
+  }
+
+  async getFnoExpiries(query = '') {
+    return this.request(`/api/fno/expiries?q=${encodeURIComponent(query)}`);
+  }
+
+  async getFnoStrikeLadder(underlying = 'NIFTY', expiry = '') {
+    return this.request(`/api/fno/strike-ladder?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(expiry)}`);
+  }
+
+  async getFnoPCR(underlying = 'NIFTY', expiry = '') {
+    return this.request(`/api/fno/pcr?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(expiry)}`);
+  }
+
+  async getDataSources() {
+    return this.request('/api/system/sources');
+  }
+
+  async getMomentumScreener(limit = 20) {
+    return this.request(`/api/screeners/momentum?limit=${limit}`);
+  }
+
+  async getVolatilityScreener(limit = 20) {
+    return this.request(`/api/screeners/volatility?limit=${limit}`);
+  }
+
+  async getTrendScreener(limit = 20) {
+    return this.request(`/api/screeners/trend?limit=${limit}`);
+  }
+
+  async getStrategyTemplates() {
+    return this.request('/api/strategies/templates');
+  }
+
+  async getAlerts() {
+    return this.request('/api/alerts');
+  }
+
+  async createAlert(payload) {
+    return this.request('/api/alerts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
   }
 }

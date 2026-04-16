@@ -36,6 +36,18 @@ const useStockData = (symbol = 'AAPL', timeframe = '1h') => {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    // Continuous recheck for intraday views.
+    const isIntraday = timeframe === '15m' || timeframe === '1h';
+    if (!isIntraday) return undefined;
+
+    const id = setInterval(() => {
+      fetchData();
+    }, 30000);
+
+    return () => clearInterval(id);
+  }, [timeframe, fetchData]);
+
   return { data, news, loading, error, refetch: fetchData };
 };
 

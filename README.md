@@ -74,14 +74,24 @@ graph TD
 
 ### Endpoints
 *   `GET /health`: System health check (Status, Timestamp, Environment).
-*   `GET /api/stocks/:symbol`: Fetch OHLCV data (parms: `timeframe`, `limit`).
-*   `GET /api/stocks/search/all`: Fast search across `stocks_summary` table.
+*   `GET /api/system/sources`: Data lineage for stocks/F&O pipelines.
+*   `GET /api/stocks/:symbol`: Fetch OHLCV data (`timeframe`, `limit`) with holiday/session filtering.
+*   `GET /api/stocks/:symbol/range`: Fetch OHLCV data in date range.
+*   `GET /api/stocks/search/all`: Fast symbol search from `stocks_summary`.
 *   `GET /api/stocks/news/latest`: Latest market intelligence.
-*   `GET /api/stocks/trades/futuristic`: Predictive trade signals.
+*   `GET /api/stocks/trades/futuristic`: SMC-oriented trade suggestions.
+*   `GET /api/stocks/market/status|holidays|timings`: Market calendar and trading session APIs.
+*   `GET /api/fno/contracts|expiries|strike-ladder|pcr`: F&O analytics endpoints.
+*   `POST /api/fno/sync`: Admin-protected F&O contract sync from Upstox.
+*   `GET /api/screeners/momentum|volatility|trend`: Screener APIs.
+*   `GET /api/strategies/templates`: Strategy template API.
+*   `GET|POST /api/alerts`: Server-side alert APIs.
+*   `GET /api/live/ltp`: Live quote passthrough endpoint.
 
 ### Security & CORS
 - Backend implements dynamic CORS allowing `localhost` on any port and specific origins from `.env`.
 - Connection pooling is used for ClickHouse to ensure scalable querying.
+- JWT-based auth with role claims (`analyst`/`admin`) is enforced for admin sync operations.
 
 ## ⌨️ Shortcuts & UX
 - **Type Anywhere**: Instant symbol search activation.
@@ -96,6 +106,17 @@ graph TD
 
 ## 🚧 Status & Performance
 ProTrader is now in **Advanced Beta (Elite Edition)**. The platform features sub-second OHLCV retrieval and real-time frontend signal processing.
+
+## ⚙️ Environment Variables (Backend)
+
+See `backend/.env.example`. Key variables:
+
+- `UPSTOX_ACCESS_TOKEN`
+- `ENABLE_UPSTOX_SYNC`
+- `UPSTOX_FNO_SYNC_ENABLED`
+- `UPSTOX_FNO_SEED_SYMBOLS`
+- `ADMIN_USERNAMES`
+- `JWT_SECRET`
 
 ## 🎯 Next Steps (Roadmap)
 - [x] **Phase 1**: Implement real-time NewsAPI integration.

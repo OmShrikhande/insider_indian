@@ -12,7 +12,7 @@ import { scanPatterns } from '../lib/patterns';
 import { detectSMC } from '../lib/smc';
 import { calculateVolumeProfile } from '../lib/volumeProfile';
 
-const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns, showGrid }) => {
+const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, activePatterns, showGrid }) => {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const candleRef = useRef(null);
@@ -71,8 +71,8 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
         timeVisible: true,
         secondsVisible: false,
         // Start zoomed-in by default and keep interaction responsive.
-        barSpacing: 10,
-        minBarSpacing: 2,
+        barSpacing: 8,
+        minBarSpacing: 4,
         rightOffset: 5,
       },
       handleScroll: true,
@@ -129,6 +129,19 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
       });
     }
   }, [showGrid]);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const tf = timeframe || '1h';
+    const spacing = tf === '15m' ? 14 : tf === '1h' ? 11 : 8;
+    const minSpacing = tf === '15m' ? 8 : tf === '1h' ? 6 : 4;
+    chartRef.current.applyOptions({
+      timeScale: {
+        barSpacing: spacing,
+        minBarSpacing: minSpacing,
+      },
+    });
+  }, [timeframe]);
 
   // ─── Rebuild all series when data or indicators change ──────────────────────
   useEffect(() => {
@@ -403,7 +416,7 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
     }
 
     const timeScale = chart.timeScale();
-    const zoomToRecentBars = (barCount = 140) => {
+    const zoomToRecentBars = (barCount = 160) => {
       const total = data.length;
       if (total < 2) return;
       const to = total - 1 + 4;
@@ -411,18 +424,20 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
       timeScale.setVisibleLogicalRange({ from, to });
     };
 
+    const barCountByTf = timeframe === '15m' ? 90 : timeframe === '1h' ? 120 : 220;
+
     if (!initialZoomDoneRef.current) {
-      zoomToRecentBars();
+      zoomToRecentBars(barCountByTf);
       initialZoomDoneRef.current = true;
       prevSymbolRef.current = symbol;
       return;
     }
 
     if (prevSymbolRef.current !== symbol) {
-      zoomToRecentBars();
+      zoomToRecentBars(barCountByTf);
       prevSymbolRef.current = symbol;
     }
-  }, [data, news, activeIndicators, activePatterns, symbol]);
+  }, [data, news, activeIndicators, activePatterns, symbol, timeframe]);
 
   const animateZoom = (direction) => {
     const ts = chartRef.current?.timeScale();
@@ -460,8 +475,14 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
 
   const handleChartClick = useCallback((e) => {
     if (!chartRef.current || !candleRef.current) return;
-    const price = candleRef.current.coordinateToPrice(e.nativeEvent.offsetY);
-    const time = chartRef.current.timeScale().coordinateToTime(e.nativeEvent.offsetX);
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
+    const price = candleRef.current.coordinateToPrice(y);
+    const time = chartRef.current.timeScale().coordinateToTime(x);
+    if (price == null || time == null) return;
 
     if (isRulerMode) {
       if (!rulerState) {
@@ -497,8 +518,14 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
 
   const handleMouseMove = useCallback((e) => {
     if (!chartRef.current || !candleRef.current) return;
-    const price = candleRef.current.coordinateToPrice(e.nativeEvent.offsetY);
-    const time = chartRef.current.timeScale().coordinateToTime(e.nativeEvent.offsetX);
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return;
+    const price = candleRef.current.coordinateToPrice(y);
+    const time = chartRef.current.timeScale().coordinateToTime(x);
+    if (price == null || time == null) return;
 
     if (isRulerMode && rulerState) {
       setRulerState(prev => ({ ...prev, end: { time, price } }));
@@ -682,24 +709,40 @@ const CandlestickChart = ({ data, news, symbol, activeIndicators, activePatterns
            </g>
         ))}
         {/* Partial previews */}
-        {currentLine && (
-          <line 
-            x1={getTimeCoordinate(currentLine.start.time)}
-            y1={getPriceCoordinate(currentLine.start.price)}
-            x2={getTimeCoordinate(currentLine.end.time)}
-            y2={getPriceCoordinate(currentLine.end.price)}
-            stroke="rgba(0,242,255,0.5)" strokeWidth="1.5" strokeDasharray="4 4"
-          />
-        )}
-        {currentBox && (
-          <rect 
-            x={Math.min(getTimeCoordinate(currentBox.start.time) ?? 0, getTimeCoordinate(currentBox.end.time) ?? 0)}
-            y={Math.min(getPriceCoordinate(currentBox.start.price) ?? 0, getPriceCoordinate(currentBox.end.price) ?? 0)}
-            width={Math.abs((getTimeCoordinate(currentBox.start.time) ?? 0) - (getTimeCoordinate(currentBox.end.time) ?? 0))}
-            height={Math.abs((getPriceCoordinate(currentBox.start.price) ?? 0) - (getPriceCoordinate(currentBox.end.price) ?? 0))}
-            fill="rgba(0,242,255,0.1)" stroke="rgba(0,242,255,0.2)" strokeDasharray="4 4"
-          />
-        )}
+        {(() => {
+          if (!currentLine) return null;
+          const x1 = getTimeCoordinate(currentLine.start.time);
+          const y1 = getPriceCoordinate(currentLine.start.price);
+          const x2 = getTimeCoordinate(currentLine.end.time);
+          const y2 = getPriceCoordinate(currentLine.end.price);
+          if (x1 == null || y1 == null || x2 == null || y2 == null) return null;
+          return (
+            <line
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke="rgba(0,242,255,0.5)" strokeWidth="1.5" strokeDasharray="4 4"
+            />
+          );
+        })()}
+        {(() => {
+          if (!currentBox) return null;
+          const x1 = getTimeCoordinate(currentBox.start.time);
+          const y1 = getPriceCoordinate(currentBox.start.price);
+          const x2 = getTimeCoordinate(currentBox.end.time);
+          const y2 = getPriceCoordinate(currentBox.end.price);
+          if (x1 == null || y1 == null || x2 == null || y2 == null) return null;
+          return (
+            <rect
+              x={Math.min(x1, x2)}
+              y={Math.min(y1, y2)}
+              width={Math.abs(x1 - x2)}
+              height={Math.abs(y1 - y2)}
+              fill="rgba(0,242,255,0.1)" stroke="rgba(0,242,255,0.2)" strokeDasharray="4 4"
+            />
+          );
+        })()}
       </svg>
 
       {/* Ruler Overlay */}

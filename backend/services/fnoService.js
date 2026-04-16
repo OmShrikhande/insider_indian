@@ -100,6 +100,85 @@ class FnoService {
     const inserted = await this.storeContracts(contracts);
     return { inserted, count: contracts.length };
   }
+
+  async init() {
+    if (process.env.UPSTOX_FNO_SYNC_ENABLED !== 'true') return;
+    const seedSymbols = (process.env.UPSTOX_FNO_SEED_SYMBOLS || 'NIFTY,BANKNIFTY,FINNIFTY')
+      .split(',')
+      .map((s) => this.normalizeQuery(s))
+      .filter(Boolean);
+    for (const sym of seedSymbols) {
+      try {
+        await this.syncContracts(sym, 120);
+      } catch (error) {
+        console.warn(`[FNO] Seed sync failed for ${sym}:`, error.message);
+      }
+    }
+  }
+
+  async getExpiries(query = '') {
+    const safeQuery = this.normalizeQuery(query);
+    const result = await client.query({
+      query: `
+        SELECT DISTINCT expiry
+        FROM fno_contracts
+        WHERE expiry IS NOT NULL
+        ${safeQuery ? 'AND (trading_symbol LIKE {q:String} OR underlying_symbol LIKE {q:String})' : ''}
+        ORDER BY expiry ASC
+      `,
+      query_params: safeQuery ? { q: `%${safeQuery}%` } : {},
+      format: 'JSONEachRow',
+    });
+    const rows = await result.json();
+    return rows.map((r) => r.expiry).filter(Boolean);
+  }
+
+  async getStrikeLadder(underlying = 'NIFTY', expiry = '') {
+    const safeUnderlying = this.normalizeQuery(underlying || 'NIFTY');
+    const query = expiry
+      ? `
+        SELECT strike, option_type, count() as contracts
+        FROM fno_contracts
+        WHERE underlying_symbol = {underlying:String}
+          AND expiry = toDate({expiry:String})
+          AND strike IS NOT NULL
+        GROUP BY strike, option_type
+        ORDER BY strike ASC
+      `
+      : `
+        SELECT strike, option_type, count() as contracts
+        FROM fno_contracts
+        WHERE underlying_symbol = {underlying:String}
+          AND strike IS NOT NULL
+        GROUP BY strike, option_type
+        ORDER BY strike ASC
+      `;
+
+    const result = await client.query({
+      query,
+      query_params: expiry ? { underlying: safeUnderlying, expiry } : { underlying: safeUnderlying },
+      format: 'JSONEachRow',
+    });
+    return result.json();
+  }
+
+  async getPCR(underlying = 'NIFTY', expiry = '') {
+    const ladder = await this.getStrikeLadder(underlying, expiry);
+    let pe = 0;
+    let ce = 0;
+    ladder.forEach((row) => {
+      if (String(row.option_type || '').toUpperCase().includes('PE')) pe += Number(row.contracts || 0);
+      if (String(row.option_type || '').toUpperCase().includes('CE')) ce += Number(row.contracts || 0);
+    });
+    return {
+      underlying: this.normalizeQuery(underlying),
+      expiry: expiry || null,
+      putContracts: pe,
+      callContracts: ce,
+      pcr: ce > 0 ? pe / ce : null,
+      note: 'PCR is computed from available contract distribution when OI feed is unavailable.',
+    };
+  }
 }
 
 module.exports = new FnoService();

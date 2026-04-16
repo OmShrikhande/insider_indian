@@ -5,6 +5,7 @@ import useStockData from '../hooks/useStockData';
 import Sidebar from './Sidebar';
 import NewsList from './NewsList';
 import TradeFeed from './TradeFeed';
+import ResearchPanel from './ResearchPanel';
 import IndicatorPanel from './IndicatorPanel';
 import PatternPanel from './PatternPanel';
 import AuthModal from './AuthModal';
@@ -64,6 +65,11 @@ const Dashboard = () => {
       if (e.key.toLowerCase() === 't' && !e.ctrlKey) {
         if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
         setActiveRightPanel('trades');
+        return;
+      }
+      if (e.key.toLowerCase() === 'r' && !e.ctrlKey) {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+        setActiveRightPanel('research');
         return;
       }
       if (e.key === '/' || (e.key.length === 1 && /[a-zA-Z]/.test(e.key))) {
@@ -221,6 +227,7 @@ const Dashboard = () => {
                 data={data}
                 news={news}
                 symbol={selectedSymbol}
+              timeframe={selectedTimeframe}
                 activeIndicators={activeIndicators}
                 activePatterns={activePatterns}
                 showGrid={showGrid}
@@ -258,7 +265,7 @@ const Dashboard = () => {
           >
             {isRightSidebarCollapsed ? '«' : '»'}
           </button>
-          {!isRightSidebarCollapsed && ['news', 'trades'].map(panel => (
+          {!isRightSidebarCollapsed && ['news', 'trades', 'research'].map(panel => (
             <button
               key={panel}
               onClick={() => setActiveRightPanel(panel)}
@@ -268,15 +275,17 @@ const Dashboard = () => {
                   : 'text-[#5d606b] border-b-2 border-transparent hover:text-[#848e9c]'
               }`}
             >
-              {panel === 'news' ? 'Market_Intel' : 'SMC_Alpha'}
+              {panel === 'news' ? 'Market_Intel' : panel === 'trades' ? 'SMC_Alpha' : 'Quantum_Alpha'}
             </button>
           ))}
         </div>
         {!isRightSidebarCollapsed && <div className="flex-1 overflow-hidden">
           {activeRightPanel === 'news' ? (
             <NewsList selectedSymbol={selectedSymbol} /> 
-          ) : (
+          ) : activeRightPanel === 'trades' ? (
             <TradeFeed trades={smcData.suggestions} />
+          ) : (
+            <ResearchPanel selectedSymbol={selectedSymbol} />
           )}
         </div>}
       </div>

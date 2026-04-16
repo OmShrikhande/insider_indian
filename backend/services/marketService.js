@@ -1,4 +1,4 @@
-const { testConnection } = require('../config/database');
+const { client, testConnection } = require('../config/database');
 
 class MarketService {
   constructor() {
@@ -40,6 +40,19 @@ class MarketService {
           closedExchanges: holiday.closed_exchanges || [],
           openExchanges: holiday.open_exchanges || [],
         }));
+        const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+        await client.insert({
+          table: 'market_holidays',
+          values: this.holidays.map((h) => ({
+            date: h.date,
+            description: h.description || '',
+            type: h.type || '',
+            closed_exchanges: JSON.stringify(h.closedExchanges || []),
+            open_exchanges: JSON.stringify(h.openExchanges || []),
+            updated_at: now,
+          })),
+          format: 'JSONEachRow',
+        });
         console.log(`[MarketService] Fetched ${this.holidays.length} holidays`);
         return this.holidays;
       }
@@ -79,6 +92,18 @@ class MarketService {
             endTime: new Date(exchange.end_time),
           };
         });
+        const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+        await client.insert({
+          table: 'market_sessions',
+          values: data.data.map((exchange) => ({
+            trading_date: targetDate,
+            exchange: exchange.exchange,
+            start_time: new Date(exchange.start_time).toISOString().replace('T', ' ').slice(0, 19),
+            end_time: new Date(exchange.end_time).toISOString().replace('T', ' ').slice(0, 19),
+            updated_at: now,
+          })),
+          format: 'JSONEachRow',
+        });
         this.timings[targetDate] = timings;
         console.log(`[MarketService] Fetched timings for ${targetDate}`);
         return timings;
@@ -90,7 +115,28 @@ class MarketService {
   }
 
   async getHolidays() {
-    // Cache holidays for 24 hours
+    try {
+      const persisted = await client.query({
+        query: `
+          SELECT date, description, type, closed_exchanges, open_exchanges
+          FROM market_holidays
+          ORDER BY updated_at DESC
+          LIMIT 2000
+        `,
+        format: 'JSONEachRow',
+      });
+      const rows = await persisted.json();
+      if (rows.length) {
+        this.holidays = rows.map((r) => ({
+          date: new Date(r.date).toISOString().slice(0, 10),
+          description: r.description,
+          type: r.type,
+          closedExchanges: JSON.parse(r.closed_exchanges || '[]'),
+          openExchanges: JSON.parse(r.open_exchanges || '[]'),
+        }));
+      }
+    } catch (_) {}
+
     if (!this.lastFetch || Date.now() - this.lastFetch > this.cacheExpiry) {
       await this.fetchHolidays();
       this.lastFetch = Date.now();
@@ -100,6 +146,31 @@ class MarketService {
 
   async getTimings(date = null) {
     const targetDate = date || new Date().toISOString().split('T')[0];
+
+    if (!this.timings[targetDate]) {
+      try {
+        const persisted = await client.query({
+          query: `
+            SELECT exchange, start_time, end_time
+            FROM market_sessions
+            WHERE trading_date = toDate({d:String})
+            ORDER BY updated_at DESC
+          `,
+          query_params: { d: targetDate },
+          format: 'JSONEachRow',
+        });
+        const rows = await persisted.json();
+        if (rows.length) {
+          this.timings[targetDate] = {};
+          rows.forEach((row) => {
+            this.timings[targetDate][row.exchange] = {
+              startTime: new Date(row.start_time),
+              endTime: new Date(row.end_time),
+            };
+          });
+        }
+      } catch (_) {}
+    }
 
     if (!this.timings[targetDate]) {
       await this.fetchTimings(targetDate);
