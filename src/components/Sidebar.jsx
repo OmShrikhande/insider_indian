@@ -40,9 +40,20 @@ const SidebarItem = memo(({ s, selectedSymbol, onSymbolChange, inWatchlist, onTo
 });
 SidebarItem.displayName = 'SidebarItem';
 
-const Sidebar = ({ selectedSymbol, onSymbolChange, isCollapsed = false, onToggleCollapse }) => {
+const Sidebar = ({
+  selectedSymbol,
+  onSymbolChange,
+  isCollapsed = false,
+  onToggleCollapse,
+  onFnoModeChange,
+  onFnoExpirySelect,
+}) => {
   const [symbols, setSymbols] = useState([]);
   const [fnoSymbols, setFnoSymbols] = useState([]);
+  const [fnoExpiriesMap, setFnoExpiriesMap] = useState({});
+  const [selectedFnoExpiry, setSelectedFnoExpiry] = useState('');
+  const [chainPreview, setChainPreview] = useState([]);
+  const [fnoMetaLoading, setFnoMetaLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState('all'); // all | watchlist | fno
@@ -65,20 +76,75 @@ const Sidebar = ({ selectedSymbol, onSymbolChange, isCollapsed = false, onToggle
   useEffect(() => {
     const fetchFno = async () => {
       try {
-        const response = await apiService.getFnoContracts('', 100);
+        const response = await apiService.getFnoContracts('', 400);
         if (response?.success && Array.isArray(response.data)) {
-          setFnoSymbols(response.data.map((item) => ({
-            symbol: item.underlying_symbol || item.trading_symbol,
+          const optionContracts = response.data.filter((item) => {
+            const type = String(item.option_type || item.instrument_type || '').toUpperCase();
+            return type === 'CE' || type === 'PE';
+          });
+
+          const groupedExpiries = optionContracts.reduce((acc, row) => {
+            const u = (row.underlying_symbol || '').toUpperCase();
+            const e = row.expiry;
+            if (!u || !e) return acc;
+            if (!acc[u]) acc[u] = new Set();
+            acc[u].add(e);
+            return acc;
+          }, {});
+
+          const mapWithArrays = Object.fromEntries(
+            Object.entries(groupedExpiries).map(([u, expSet]) => [u, Array.from(expSet).sort()])
+          );
+          setFnoExpiriesMap(mapWithArrays);
+
+          const uniq = Object.keys(mapWithArrays);
+          setFnoSymbols(uniq.map((symbol) => ({
+            symbol,
             in_hourly: 1,
             in_daily: 1,
           })));
+
+          if (!selectedFnoExpiry && uniq.length > 0) {
+            const firstExpiry = mapWithArrays[uniq[0]]?.[0] || '';
+            setSelectedFnoExpiry(firstExpiry);
+            if (firstExpiry) onFnoExpirySelect?.(firstExpiry);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch FNO list', err);
+        const fallback = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
+        setFnoSymbols(fallback.map((symbol) => ({ symbol, in_hourly: 1, in_daily: 1 })));
       }
     };
     fetchFno();
-  }, []);
+  }, [onFnoExpirySelect, selectedFnoExpiry]);
+
+  useEffect(() => {
+    const loadChainPreview = async () => {
+      if (viewMode !== 'fno' || !selectedSymbol || !selectedFnoExpiry) {
+        setChainPreview([]);
+        return;
+      }
+
+      try {
+        setFnoMetaLoading(true);
+        const instrumentKey = apiService.resolveFnoInstrumentKey(selectedSymbol);
+        const response = await apiService.getOptionChainByInstrument(instrumentKey, selectedFnoExpiry);
+        if ((response?.success || response?.status === 'success') && Array.isArray(response.data)) {
+          setChainPreview(response.data.slice(0, 14));
+        } else {
+          setChainPreview([]);
+        }
+      } catch (err) {
+        console.error('Failed to load option-chain preview:', err);
+        setChainPreview([]);
+      } finally {
+        setFnoMetaLoading(false);
+      }
+    };
+
+    loadChainPreview();
+  }, [viewMode, selectedSymbol, selectedFnoExpiry]);
 
   useEffect(() => {
     const fetchTopSymbols = async () => {
@@ -100,10 +166,28 @@ const Sidebar = ({ selectedSymbol, onSymbolChange, isCollapsed = false, onToggle
 
   const handleSearch = async (query) => {
     setSearch(query);
-    const response = await apiService.searchSymbols(query || '');
-    if (response) {
-      const data = Array.isArray(response) ? response : (response.data || []);
-      setSymbols(data);
+    if (viewMode === 'fno') {
+      const response = await apiService.getFnoContracts(query || '', 50);
+      if (response?.success && Array.isArray(response.data)) {
+        const optionsOnly = response.data.filter((item) => {
+          const type = String(item.option_type || item.instrument_type || '').toUpperCase();
+          return type === 'CE' || type === 'PE';
+        });
+        const uniq = Array.from(
+          new Set(optionsOnly.map((item) => (item.underlying_symbol || '').toUpperCase()).filter(Boolean))
+        );
+        setFnoSymbols(uniq.map((symbol) => ({
+          symbol,
+          in_hourly: 1,
+          in_daily: 1,
+        })));
+      }
+    } else {
+      const response = await apiService.searchSymbols(query || '');
+      if (response) {
+        const data = Array.isArray(response) ? response : (response.data || []);
+        setSymbols(data);
+      }
     }
   };
 
@@ -162,7 +246,10 @@ const Sidebar = ({ selectedSymbol, onSymbolChange, isCollapsed = false, onToggle
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => setViewMode('all')}
+                onClick={() => {
+                  setViewMode('all');
+                  onFnoModeChange?.(false);
+                }}
                 className={`flex-1 py-1 text-[8px] font-bold uppercase rounded border transition-all ${
                   viewMode === 'all' ? 'bg-[#00f2ff]/10 border-[#00f2ff] text-[#00f2ff]' : 'bg-transparent border-[#1c2127] text-[#5d606b]'
                 }`}
@@ -170,7 +257,10 @@ const Sidebar = ({ selectedSymbol, onSymbolChange, isCollapsed = false, onToggle
                 All_Intel
               </button>
               <button
-                onClick={() => setViewMode('watchlist')}
+                onClick={() => {
+                  setViewMode('watchlist');
+                  onFnoModeChange?.(false);
+                }}
                 className={`flex-1 py-1 text-[8px] font-bold uppercase rounded border transition-all ${
                   viewMode === 'watchlist' ? 'bg-[#ffea00]/10 border-[#ffea00] text-[#ffea00]' : 'bg-transparent border-[#1c2127] text-[#5d606b]'
                 }`}
@@ -178,7 +268,15 @@ const Sidebar = ({ selectedSymbol, onSymbolChange, isCollapsed = false, onToggle
                 Watchlist
               </button>
               <button
-                onClick={() => setViewMode('fno')}
+                onClick={() => {
+                  setViewMode('fno');
+                  onFnoModeChange?.(true);
+                  const defaultExpiry = fnoExpiriesMap[selectedSymbol]?.[0] || selectedFnoExpiry;
+                  if (defaultExpiry) {
+                    setSelectedFnoExpiry(defaultExpiry);
+                    onFnoExpirySelect?.(defaultExpiry);
+                  }
+                }}
                 className={`flex-1 py-1 text-[8px] font-bold uppercase rounded border transition-all ${
                   viewMode === 'fno' ? 'bg-[#39ff14]/10 border-[#39ff14] text-[#39ff14]' : 'bg-transparent border-[#1c2127] text-[#5d606b]'
                 }`}
@@ -198,15 +296,60 @@ const Sidebar = ({ selectedSymbol, onSymbolChange, isCollapsed = false, onToggle
               <span className="text-[9px] text-[#5d606b] uppercase animate-pulse font-mono">Syncing_Protocol...</span>
             </div>
           )}
+          {!loading && viewMode === 'fno' && !isCollapsed && (
+            <div className="mb-3 p-2 rounded border border-[#1c2127] bg-[#050505]">
+              <div className="text-[8px] uppercase tracking-widest text-[#39ff14] font-black mb-2">Options_Only_Mode</div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[8px] text-[#5d606b] uppercase">Expiry</span>
+                <select
+                  value={selectedFnoExpiry}
+                  onChange={(e) => {
+                    setSelectedFnoExpiry(e.target.value);
+                    onFnoExpirySelect?.(e.target.value);
+                  }}
+                  className="flex-1 bg-[#000] border border-[#1c2127] text-[#00f2ff] text-[9px] rounded px-2 py-1 font-mono"
+                >
+                  {(fnoExpiriesMap[selectedSymbol] || []).map((exp) => (
+                    <option key={exp} value={exp}>{exp}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="max-h-24 overflow-y-auto custom-scrollbar space-y-1">
+                {fnoMetaLoading ? (
+                  <div className="text-[8px] text-[#5d606b] uppercase animate-pulse">Loading_Chain...</div>
+                ) : chainPreview.length > 0 ? (
+                  chainPreview.map((row, idx) => (
+                    <div key={`${row.strike_price}-${idx}`} className="grid grid-cols-3 text-[8px] font-mono text-[#848e9c]">
+                      <span className="text-[#00f2ff]">{Number(row.call_options?.market_data?.ltp || row.call_ltp || 0).toFixed(2)}</span>
+                      <span className="text-center text-white">{row.strike_price}</span>
+                      <span className="text-right text-[#ff4d4d]">{Number(row.put_options?.market_data?.ltp || row.put_ltp || 0).toFixed(2)}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-[8px] text-[#333] uppercase">No_Chain_Data</div>
+                )}
+              </div>
+            </div>
+          )}
           {!loading && displayedSymbols.length === 0 && (
             <div className="px-4 py-8 text-center text-[#1c2127] text-[10px] uppercase font-mono">[ NO_INTEL_FOUND ]</div>
           )}
           {displayedSymbols.map((s) => (
             <SidebarItem
               key={s.symbol}
-              s={s}
+              s={viewMode === 'fno' ? { ...s, in_hourly: 1, in_daily: 1 } : s}
               selectedSymbol={selectedSymbol}
-              onSymbolChange={onSymbolChange}
+              onSymbolChange={(symbol) => {
+                onSymbolChange(symbol);
+                if (viewMode === 'fno') {
+                  onFnoModeChange?.(true);
+                  const nextExpiry = (fnoExpiriesMap[symbol] || [])[0];
+                  if (nextExpiry) {
+                    setSelectedFnoExpiry(nextExpiry);
+                    onFnoExpirySelect?.(nextExpiry);
+                  }
+                }
+              }}
               inWatchlist={watchlist.includes(s.symbol)}
               onToggleWatchlist={handleToggleWatchlist}
               compact={isCollapsed}

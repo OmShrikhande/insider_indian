@@ -37,16 +37,28 @@ const useStockData = (symbol = 'AAPL', timeframe = '1h') => {
   }, [fetchData]);
 
   useEffect(() => {
-    // Continuous recheck for intraday views.
-    const isIntraday = timeframe === '15m' || timeframe === '1h';
-    if (!isIntraday) return undefined;
+    if (!symbol) return undefined;
 
-    const id = setInterval(() => {
-      fetchData();
-    }, 30000);
+    const streamUrl = apiService.getStockStreamUrl(symbol, timeframe, 3000);
+    const eventSource = new EventSource(streamUrl);
 
-    return () => clearInterval(id);
-  }, [timeframe, fetchData]);
+    eventSource.addEventListener('stock_snapshot', (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        setData(payload.data || []);
+        setError(null);
+        setLoading(false);
+      } catch (err) {
+        console.error('Failed to parse stock stream payload:', err);
+      }
+    });
+
+    eventSource.addEventListener('error', () => {
+      // Keep UI stable and reconnect automatically through EventSource.
+    });
+
+    return () => eventSource.close();
+  }, [symbol, timeframe]);
 
   return { data, news, loading, error, refetch: fetchData };
 };

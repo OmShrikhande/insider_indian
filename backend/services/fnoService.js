@@ -6,6 +6,50 @@ const upstoxApi = require('./upstoxApiService');
  * ROAST FIX: Centralized data fetching and improved Clickhouse ingestion.
  */
 class FnoService {
+  static INSTRUMENT_KEY_REGEX = /^(NSE_EQ|NSE_FO|NCD_FO|BSE_EQ|BSE_FO|BCD_FO|MCX_FO|NSE_COM|NSE_INDEX|BSE_INDEX|MCX_INDEX)\|[\w ]+$/;
+  static DEFAULT_FNO_UNDERLYINGS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
+
+  resolveUnderlyingSearchTerm(symbol) {
+    const normalized = this.normalizeQuery(symbol);
+    const map = {
+      NIFTY: 'Nifty 50',
+      BANKNIFTY: 'Nifty Bank',
+      FINNIFTY: 'Nifty Fin Service',
+      MIDCPNIFTY: 'Nifty Mid Select'
+    };
+    return map[normalized] || normalized;
+  }
+
+  resolveCanonicalIndexKey(symbol) {
+    const normalized = this.normalizeQuery(symbol);
+    const map = {
+      NIFTY: 'NSE_INDEX|Nifty 50',
+      BANKNIFTY: 'NSE_INDEX|Nifty Bank',
+      FINNIFTY: 'NSE_INDEX|Nifty Fin Service',
+      MIDCPNIFTY: 'NSE_INDEX|Nifty Mid Select'
+    };
+    return map[normalized] || null;
+  }
+
+  isValidInstrumentKey(value) {
+    return FnoService.INSTRUMENT_KEY_REGEX.test(String(value || '').trim());
+  }
+
+  sanitizeForJson(value) {
+    if (typeof value === 'bigint') {
+      return Number(value);
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => this.sanitizeForJson(item));
+    }
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, val]) => [key, this.sanitizeForJson(val)])
+      );
+    }
+    return value;
+  }
+
   resampleCandles(rawCandles, timeframe) {
     if (!rawCandles.length || timeframe === '1d' || timeframe === '30m' || timeframe === '1minute') {
       return rawCandles;
@@ -55,8 +99,26 @@ class FnoService {
     return q.replace(/[^A-Z0-9&\- ]/g, '').slice(0, 32);
   }
 
+  deriveOptionType(item) {
+    const explicit = String(item.option_type || '').toUpperCase();
+    if (explicit === 'CE' || explicit === 'PE') return explicit;
+
+    const instrumentType = String(item.instrument_type || '').toUpperCase();
+    if (instrumentType === 'CE' || instrumentType === 'PE') return instrumentType;
+
+    const tradingSymbol = String(item.trading_symbol || item.symbol || '').toUpperCase();
+    if (/\bCE\b/.test(tradingSymbol)) return 'CE';
+    if (/\bPE\b/.test(tradingSymbol)) return 'PE';
+    return null;
+  }
+
+  isSupportedFnoUnderlying(symbol) {
+    return FnoService.DEFAULT_FNO_UNDERLYINGS.includes(this.normalizeQuery(symbol));
+  }
+
   async fetchFromUpstox(query, limit = 50) {
-    const contracts = await upstoxApi.searchInstrument(query, 'NSE', 'FO', limit);
+    const safeLimit = Math.max(1, Math.min(20, Number(limit) || 20));
+    const contracts = await upstoxApi.searchInstrument(query, 'NSE', 'FO', safeLimit);
     return contracts.map((item) => ({
       instrument_key: item.instrument_key || '',
       trading_symbol: item.trading_symbol || item.symbol || '',
@@ -68,7 +130,7 @@ class FnoService {
       tick_size: Number(item.tick_size || 0),
       expiry: item.expiry || null,
       strike: item.strike_price != null ? Number(item.strike_price) : null,
-      option_type: item.option_type || null,
+      option_type: this.deriveOptionType(item),
       underlying_symbol: this.normalizeQuery(query),
       updated_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
     })).filter((item) => item.instrument_key && item.trading_symbol);
@@ -91,8 +153,8 @@ class FnoService {
     const fetchLocal = async (q) => {
       const result = await client.query({
         query: q
-          ? `SELECT * FROM fno_contracts WHERE trading_symbol LIKE {q:String} OR underlying_symbol LIKE {q:String} ORDER BY updated_at DESC LIMIT {limit:Uint32} BY instrument_key`
-          : `SELECT * FROM fno_contracts ORDER BY updated_at DESC LIMIT {limit:Uint32} BY instrument_key`,
+          ? `SELECT * FROM fno_contracts WHERE trading_symbol LIKE {q:String} OR underlying_symbol LIKE {q:String} ORDER BY updated_at DESC LIMIT {limit:UInt32} BY instrument_key`
+          : `SELECT * FROM fno_contracts ORDER BY updated_at DESC LIMIT {limit:UInt32} BY instrument_key`,
         query_params: q ? { q: `%${q}%`, limit: safeLimit } : { limit: safeLimit },
         format: 'JSONEachRow',
       });
@@ -102,13 +164,19 @@ class FnoService {
     let rows = await fetchLocal(safeQuery);
 
     // ROAST FIX: Sync-on-Demand. If the user searches but we have nothing, sync it from Upstox immediately.
-    if (safeQuery && rows.length === 0) {
+    if (safeQuery && rows.length === 0 && this.isSupportedFnoUnderlying(safeQuery)) {
       console.log(`[FNO] No local data for "${safeQuery}". Triggering on-demand sync...`);
-      await this.syncContracts(safeQuery, 50);
+      await this.syncContracts(safeQuery, 20);
       rows = await fetchLocal(safeQuery);
     }
 
-    return rows;
+    // Seed a default universe if F&O list is completely empty.
+    if (!safeQuery && rows.length === 0) {
+      await this.syncContracts('NIFTY', 100);
+      rows = await fetchLocal('');
+    }
+
+    return this.sanitizeForJson(rows);
   }
 
   async syncContracts(query = 'NIFTY', limit = 100) {
@@ -146,7 +214,10 @@ class FnoService {
   }
 
   async getExpiries(query = '') {
-    const safeQuery = this.normalizeQuery(query);
+    let safeQuery = this.normalizeQuery(query);
+    if (!this.isSupportedFnoUnderlying(safeQuery)) {
+      safeQuery = 'NIFTY';
+    }
     
     const fetchLocal = async (q) => {
       const result = await client.query({
@@ -161,9 +232,9 @@ class FnoService {
     let expiries = await fetchLocal(safeQuery);
 
     // ROAST FIX: If no expiries found, sync contracts first to discover them
-    if (safeQuery && expiries.length === 0) {
+    if (safeQuery && expiries.length === 0 && this.isSupportedFnoUnderlying(safeQuery)) {
       console.log(`[FNO] No expiries found for "${safeQuery}". Syncing contracts to discover...`);
-      await this.syncContracts(safeQuery, 50);
+      await this.syncContracts(safeQuery, 20);
       expiries = await fetchLocal(safeQuery);
     }
 
@@ -187,7 +258,8 @@ class FnoService {
       query_params: expiry ? { underlying: safeUnderlying, expiry } : { underlying: safeUnderlying },
       format: 'JSONEachRow',
     });
-    return result.json();
+    const rows = await result.json();
+    return this.sanitizeForJson(rows);
   }
 
   async getPCR(underlying = 'NIFTY', expiry = '') {
@@ -303,36 +375,57 @@ class FnoService {
    */
   async syncOptionChain(underlyingSymbol, expiry) {
     try {
-      // 1. Get underlying instrument key
-      // ROAST FIX: Indices MUST be searched in the INDEX segment
-      const isIndex = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'].includes(underlyingSymbol.toUpperCase());
-      const segment = isIndex ? 'INDEX' : 'EQ';
-      const searchSymbol = underlyingSymbol === 'NIFTY' ? 'Nifty 50' : (underlyingSymbol === 'BANKNIFTY' ? 'Nifty Bank' : underlyingSymbol);
-      
-      const instruments = await upstoxApi.searchInstrument(searchSymbol, 'NSE', segment, 1);
-      if (!instruments.length) return { success: false, error: 'Underlying symbol not found on segment ' + segment };
-      const underlyingKey = instruments[0].instrument_key;
+      const normalizedUnderlying = this.normalizeQuery(underlyingSymbol);
+      const expiryDate = String(expiry || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(expiryDate)) {
+        return { success: false, error: 'Invalid expiry format. Expected YYYY-MM-DD' };
+      }
 
-      // 2. Fetch chain from Upstox
-      let chainData = await upstoxApi.fetchOptionChain(underlyingKey, expiry);
-      
-      // ROAST FIX: If provided expiry returns nothing, try to find the nearest valid one
-      if (!chainData.length) {
-        console.log(`[FNO] Requested expiry ${expiry} returned no data for ${underlyingSymbol}. Attempting fallback...`);
-        const validExpiries = await this.getExpiries(underlyingSymbol);
-        
-        if (validExpiries.length > 0 && validExpiries[0] !== expiry) {
-          console.log(`[FNO] Retrying with nearest valid expiry: ${validExpiries[0]}`);
-          chainData = await upstoxApi.fetchOptionChain(underlyingKey, validExpiries[0]);
+      // 1. Get underlying instrument key
+      const isIndex = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'].includes(normalizedUnderlying);
+      const segment = isIndex ? 'INDEX' : 'EQ';
+      const directInstrumentKey = this.isValidInstrumentKey(underlyingSymbol) ? String(underlyingSymbol).trim() : null;
+      let underlyingKey = directInstrumentKey;
+
+      if (!underlyingKey) {
+        const canonicalIndexKey = this.resolveCanonicalIndexKey(normalizedUnderlying);
+        if (canonicalIndexKey) {
+          underlyingKey = canonicalIndexKey;
         }
       }
 
-      if (!chainData.length) return { success: false, error: 'No chain data available for any expiry' };
+      if (!underlyingKey) {
+        const searchSymbol = this.resolveUnderlyingSearchTerm(normalizedUnderlying);
+        const instruments = await upstoxApi.searchInstrument(searchSymbol, 'NSE', segment, 1);
+        if (!instruments.length) return { success: false, error: `Underlying symbol not found on segment ${segment}` };
+        underlyingKey = instruments[0].instrument_key;
+      }
+
+      if (!this.isValidInstrumentKey(underlyingKey)) {
+        return { success: false, error: 'Invalid underlying instrument key format' };
+      }
+
+      if (/^MCX_/.test(underlyingKey)) {
+        return { success: false, error: 'Option chain is not available for MCX exchange in Upstox API' };
+      }
+
+      // 2. Fetch chain from Upstox using exact instrument_key + expiry_date.
+      let chainData = await upstoxApi.fetchOptionChain(underlyingKey, expiryDate);
+      // IMPORTANT: Disabled "nearest expiry" fallback to preserve exact API contract.
+      // if (!chainData.length) {
+      //   const validExpiries = await this.getExpiries(normalizedUnderlying);
+      //   if (validExpiries.length > 0 && validExpiries[0] !== expiryDate) {
+      //     chainData = await upstoxApi.fetchOptionChain(underlyingKey, validExpiries[0]);
+      //   }
+      // }
+
+      if (!chainData.length) return { success: false, error: 'No chain data available for provided instrument_key + expiry_date' };
 
       // 3. Transform and Save to ClickHouse
       const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
       const rows = chainData.map(item => ({
-        underlying_symbol: underlyingSymbol,
+        underlying_symbol: normalizedUnderlying,
+        underlying_key: item.underlying_key || underlyingKey,
         expiry: item.expiry,
         strike_price: Number(item.strike_price),
         pcr: Number(item.pcr || 0),
@@ -340,6 +433,7 @@ class FnoService {
         call_key: item.call_options?.instrument_key || '',
         call_ltp: Number(item.call_options?.market_data?.ltp || 0),
         call_oi: Number(item.call_options?.market_data?.oi || 0),
+        call_volume: Number(item.call_options?.market_data?.volume || 0),
         call_delta: Number(item.call_options?.option_greeks?.delta || 0),
         call_theta: Number(item.call_options?.option_greeks?.theta || 0),
         call_gamma: Number(item.call_options?.option_greeks?.gamma || 0),
@@ -348,11 +442,14 @@ class FnoService {
         put_key: item.put_options?.instrument_key || '',
         put_ltp: Number(item.put_options?.market_data?.ltp || 0),
         put_oi: Number(item.put_options?.market_data?.oi || 0),
-        put_delta: Number(item.put_options?.market_data?.delta || 0),
-        put_theta: Number(item.put_options?.market_data?.theta || 0),
-        put_gamma: Number(item.put_options?.market_data?.gamma || 0),
-        put_vega: Number(item.put_options?.market_data?.vega || 0),
-        put_iv: Number(item.put_options?.market_data?.iv || 0),
+        put_volume: Number(item.put_options?.market_data?.volume || 0),
+        put_delta: Number(item.put_options?.option_greeks?.delta || 0),
+        put_theta: Number(item.put_options?.option_greeks?.theta || 0),
+        put_gamma: Number(item.put_options?.option_greeks?.gamma || 0),
+        put_vega: Number(item.put_options?.option_greeks?.vega || 0),
+        put_iv: Number(item.put_options?.option_greeks?.iv || 0),
+        call_options_json: JSON.stringify(item.call_options || {}),
+        put_options_json: JSON.stringify(item.put_options || {}),
         updated_at: now
       }));
 
@@ -376,18 +473,124 @@ class FnoService {
     try {
       const result = await client.query({
         query: `
-          SELECT * FROM fno_option_chain 
-          WHERE underlying_symbol = {s:String} AND expiry = {e:String}
+          SELECT *
+          FROM (
+            SELECT
+              underlying_symbol,
+              expiry,
+              strike_price,
+              argMax(pcr, updated_at) as pcr,
+              argMax(underlying_spot_price, updated_at) as underlying_spot_price,
+              argMax(call_key, updated_at) as call_key,
+              argMax(call_ltp, updated_at) as call_ltp,
+              argMax(call_oi, updated_at) as call_oi,
+              argMax(call_volume, updated_at) as call_volume,
+              argMax(call_delta, updated_at) as call_delta,
+              argMax(call_theta, updated_at) as call_theta,
+              argMax(call_gamma, updated_at) as call_gamma,
+              argMax(call_vega, updated_at) as call_vega,
+              argMax(call_iv, updated_at) as call_iv,
+              argMax(put_key, updated_at) as put_key,
+              argMax(put_ltp, updated_at) as put_ltp,
+              argMax(put_oi, updated_at) as put_oi,
+              argMax(put_volume, updated_at) as put_volume,
+              argMax(put_delta, updated_at) as put_delta,
+              argMax(put_theta, updated_at) as put_theta,
+              argMax(put_gamma, updated_at) as put_gamma,
+              argMax(put_vega, updated_at) as put_vega,
+              argMax(put_iv, updated_at) as put_iv
+            FROM fno_option_chain
+            WHERE underlying_symbol = {s:String} AND expiry = toDate({e:String})
+            GROUP BY underlying_symbol, expiry, strike_price
+          )
           ORDER BY strike_price ASC
         `,
         query_params: { s: symbol, e: expiry },
         format: 'JSONEachRow'
       });
       const rows = await result.json();
-      return { success: true, data: rows };
+      return { success: true, data: this.sanitizeForJson(rows) };
     } catch (err) {
       return { success: false, error: err.message };
     }
+  }
+
+  async getOptionChainRaw(instrumentKey, expiryDate) {
+    try {
+      const fetchExact = async () => client.query({
+        query: `
+          SELECT
+            argMax(t.underlying_key, t.updated_at) AS stored_underlying_key,
+            argMax(t.underlying_spot_price, t.updated_at) AS underlying_spot_price,
+            t.expiry AS expiry,
+            t.strike_price AS strike_price,
+            argMax(t.pcr, t.updated_at) AS pcr,
+            argMax(t.call_options_json, t.updated_at) AS call_options_json,
+            argMax(t.put_options_json, t.updated_at) AS put_options_json
+          FROM fno_option_chain t
+          WHERE t.underlying_key = {instrument_key:String}
+            AND t.expiry = toDate({expiry_date:String})
+          GROUP BY t.expiry, t.strike_price
+          ORDER BY strike_price ASC
+        `,
+        query_params: {
+          instrument_key: instrumentKey,
+          expiry_date: expiryDate,
+        },
+        format: 'JSONEachRow',
+      });
+
+      const exactRows = await (await fetchExact()).json();
+      let rows = exactRows;
+      let stale = false;
+
+      if (!rows.length) {
+        const fallback = await client.query({
+          query: `
+            SELECT
+              argMax(t.underlying_key, t.updated_at) AS stored_underlying_key,
+              argMax(t.underlying_spot_price, t.updated_at) AS underlying_spot_price,
+              t.expiry AS expiry,
+              t.strike_price AS strike_price,
+              argMax(t.pcr, t.updated_at) AS pcr,
+              argMax(t.call_options_json, t.updated_at) AS call_options_json,
+              argMax(t.put_options_json, t.updated_at) AS put_options_json
+            FROM fno_option_chain t
+            WHERE t.underlying_key = {instrument_key:String}
+            GROUP BY t.expiry, t.strike_price
+            ORDER BY expiry DESC, strike_price ASC
+          `,
+          query_params: { instrument_key: instrumentKey },
+          format: 'JSONEachRow',
+        });
+        const fallbackRows = await fallback.json();
+        if (fallbackRows.length) {
+          const latestExpiry = fallbackRows[0].expiry;
+          rows = fallbackRows.filter((r) => String(r.expiry) === String(latestExpiry));
+          stale = true;
+        }
+      }
+
+      const payload = rows.map((row) => ({
+        expiry: typeof row.expiry === 'string' ? row.expiry.slice(0, 10) : row.expiry,
+        pcr: Number(row.pcr || 0),
+        strike_price: Number(row.strike_price),
+        underlying_key: row.stored_underlying_key || instrumentKey,
+        underlying_spot_price: Number(row.underlying_spot_price || 0),
+        call_options: row.call_options_json ? JSON.parse(row.call_options_json) : {},
+        put_options: row.put_options_json ? JSON.parse(row.put_options_json) : {},
+      }));
+
+      return { success: true, data: this.sanitizeForJson(payload), stale };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  async syncAndGetOptionChainRaw(instrumentKey, expiryDate) {
+    const sync = await this.syncOptionChain(instrumentKey, expiryDate);
+    if (!sync.success) return sync;
+    return this.getOptionChainRaw(instrumentKey, expiryDate);
   }
 }
 

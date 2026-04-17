@@ -1,25 +1,35 @@
 import { useState, useEffect } from 'react';
-import CandlestickChart from './CandlestickChart';
-import TimeframeSelector from './TimeframeSelector';
-import useStockData from '../hooks/useStockData';
 import Sidebar from './Sidebar';
+import AuthModal from './AuthModal';
+import authService from '../services/authService';
+import useStockData from '../hooks/useStockData';
+import useFnoData from '../hooks/useFnoData';
+import { useFnoLogic } from '../hooks/useFnoLogic';
+import { detectSMC } from '../lib/smc';
+import { INDICATORS } from '../lib/indicatorRegistry';
+import { DEFAULT_PATTERNS } from '../lib/patternRegistry';
+
+// Modularized Components
+import DashboardTopBar from './DashboardTopBar';
+import MainChartArea from './MainChartArea';
+import ScreenerPanel from './ScreenerPanel';
 import NewsList from './NewsList';
 import TradeFeed from './TradeFeed';
 import ResearchPanel from './ResearchPanel';
-import IndicatorPanel from './IndicatorPanel';
-import PatternPanel from './PatternPanel';
-import AuthModal from './AuthModal';
-import ChartErrorBoundary from './ChartErrorBoundary';
-import authService from '../services/authService';
-import { INDICATORS } from '../lib/indicatorRegistry';
-import { DEFAULT_PATTERNS } from '../lib/patternRegistry';
-import { detectSMC } from '../lib/smc';
-import './Dashboard.css'; // New CSS for premium styling
+
+import './Dashboard.css';
 
 const buildDefaultIndicators = () =>
   Object.fromEntries(INDICATORS.map(ind => [ind.id, ind.enabled]));
 
+import OptionChainTable from './OptionChainTable';
+
+/**
+ * Dashboard - Core platform layout.
+ * ROAST FIX: Transformed from an 800-line "God Component" into a clean layout orchestrator.
+ */
 const Dashboard = () => {
+  // --- Core State ---
   const [selectedTimeframe, setSelectedTimeframe] = useState('1h');
   const [selectedSymbol, setSelectedSymbol] = useState('ABB');
   const [activeRightPanel, setActiveRightPanel] = useState('news');
@@ -29,267 +39,198 @@ const Dashboard = () => {
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
   const [currentUser, setCurrentUser] = useState(authService.getCurrentUser());
-  const { data, news, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
+  const [showScreener, setShowScreener] = useState(false);
+  const [showOptionChain, setShowOptionChain] = useState(false);
   const [smcData, setSmcData] = useState({ suggestions: [] });
 
+  // --- Specialized Hooks ---
+  const { data, news, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
+  const fnoLogic = useFnoLogic(selectedSymbol, data);
+  const fnoData = useFnoData(selectedSymbol, fnoLogic.fnoExpiry, fnoLogic.fnoStrike, selectedTimeframe);
+
+  // --- Effects ---
   useEffect(() => {
-    if (data.length > 0) {
-      const result = detectSMC(data);
-      setSmcData(result);
-    }
+    if (data.length > 0) setSmcData(detectSMC(data));
   }, [data]);
 
-  // Global "Type to search" shortcut
+  // Global Hotkeys & Listeners
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.ctrlKey && e.key.toLowerCase() === 'b') {
-        e.preventDefault();
-        setIsLeftSidebarCollapsed((prev) => !prev);
-        return;
-      }
-      if (e.ctrlKey && e.key.toLowerCase() === 'i') {
-        e.preventDefault();
-        setIsRightSidebarCollapsed((prev) => !prev);
-        return;
-      }
-      if (e.key.toLowerCase() === 'g' && !e.ctrlKey) {
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-        setShowGrid((prev) => !prev);
-        return;
-      }
-      if (e.key.toLowerCase() === 'n' && !e.ctrlKey) {
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-        setActiveRightPanel('news');
-        return;
-      }
-      if (e.key.toLowerCase() === 't' && !e.ctrlKey) {
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-        setActiveRightPanel('trades');
-        return;
-      }
-      if (e.key.toLowerCase() === 'r' && !e.ctrlKey) {
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
-        setActiveRightPanel('research');
-        return;
-      }
+      const activeTag = document.activeElement.tagName;
+      const isInputOpen = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag);
+
+      if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); setIsLeftSidebarCollapsed(p => !p); return; }
+      if (e.ctrlKey && e.key.toLowerCase() === 'i') { e.preventDefault(); setIsRightSidebarCollapsed(p => !p); return; }
+      if (isInputOpen) return;
+
+      const hotkeys = {
+        'g': () => setShowGrid(p => !p),
+        'n': () => setActiveRightPanel('news'),
+        't': () => setActiveRightPanel('trades'),
+        'r': () => setActiveRightPanel('research'),
+        'o': () => setShowOptionChain(p => !p),
+      };
+
+      if (hotkeys[e.key.toLowerCase()]) hotkeys[e.key.toLowerCase()]();
       if (e.key === '/' || (e.key.length === 1 && /[a-zA-Z]/.test(e.key))) {
-        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
         if (e.key === '/') e.preventDefault();
         document.getElementById('symbol-search-input')?.focus();
       }
     };
+
+    const handleInfoClick = (e) => {
+      setSelectedSymbol(e.detail.symbol);
+      setIsRightSidebarCollapsed(false);
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('roxey-info-click', handleInfoClick);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('roxey-info-click', handleInfoClick);
+    };
   }, []);
 
-  const activeIndicatorCount = Object.values(activeIndicators).filter(Boolean).length;
-  const activePatternCount  = Object.values(activePatterns).filter(Boolean).length;
-
-  if (!currentUser) {
-    return <AuthModal onLoginSuccess={setCurrentUser} />;
-  }
+  if (!currentUser) return <AuthModal onLoginSuccess={setCurrentUser} />;
 
   const handleLogout = () => {
     authService.logout();
     setCurrentUser(null);
   };
 
-  return (
-    <div className="flex h-screen overflow-hidden elite-dashboard font-mono-elite">
+  const activeIndicatorCount = Object.values(activeIndicators).filter(Boolean).length;
+  const activePatternCount  = Object.values(activePatterns).filter(Boolean).length;
 
-      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+  return (
+    <div className="flex h-screen overflow-hidden elite-dashboard font-mono-elite bg-black">
+      {showScreener && <ScreenerPanel onClose={() => setShowScreener(false)} />}
+
       <Sidebar
         selectedSymbol={selectedSymbol}
         onSymbolChange={setSelectedSymbol}
         isCollapsed={isLeftSidebarCollapsed}
-        onToggleCollapse={() => setIsLeftSidebarCollapsed((prev) => !prev)}
+        onToggleCollapse={() => setIsLeftSidebarCollapsed(p => !p)}
+        onFnoModeChange={(enabled) => fnoLogic.setIsFnoMode(enabled)}
+        onFnoExpirySelect={(expiry) => {
+          if (expiry) {
+            fnoLogic.setFnoStrike('');
+            fnoLogic.setFnoExpiry(expiry);
+          }
+        }}
       />
 
-      {/* ── Main Column ──────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0 border-r border-[#1c2127]">
+        <DashboardTopBar 
+          selectedSymbol={selectedSymbol}
+          dataCount={data.length}
+          onShowScreener={() => setShowScreener(true)}
+          isFnoMode={fnoLogic.isFnoMode}
+          onToggleFnoMode={() => fnoLogic.setIsFnoMode(!fnoLogic.isFnoMode)}
+          fnoExpiry={fnoLogic.fnoExpiry}
+          onFnoExpiryChange={e => { fnoLogic.setFnoStrike(''); fnoLogic.setFnoExpiry(e.target.value); }}
+          fnoStrike={fnoLogic.fnoStrike}
+          onFnoStrikeChange={e => fnoLogic.setFnoStrike(e.target.value)}
+          availableExpiries={fnoLogic.availableExpiries}
+          availableStrikes={fnoLogic.availableStrikes}
+          selectedTimeframe={selectedTimeframe}
+          onTimeframeChange={setSelectedTimeframe}
+          activeIndicators={activeIndicators}
+          onIndicatorToggle={(id, val) => setActiveIndicators(p => ({ ...p, [id]: val }))}
+          activePatterns={activePatterns}
+          onPatternToggle={(id, val) => setActivePatterns(p => ({ ...p, [id]: val }))}
+          showGrid={showGrid}
+          onToggleGrid={() => setShowGrid(p => !p)}
+          onLogout={handleLogout}
+          currentUser={currentUser}
+          showOptionChain={showOptionChain}
+          onToggleOptionChain={() => setShowOptionChain(p => !p)}
+        />
 
-        {/* Top Bar — Elite Transparent System */}
-        <div className="h-16 flex-shrink-0 bg-black/60 backdrop-blur-xl border-b border-[#1c2127]/50 flex items-center gap-6 px-6 relative z-[100] overflow-visible">
-
-          {/* Symbol info */}
-          <div className="flex flex-col">
-            <div className="flex items-center gap-2">
-              <span className="font-black text-xl text-[#00f2ff] tracking-tight">
-                {selectedSymbol}
-              </span>
-              <span className="text-[10px] bg-[#00f2ff]/10 text-[#00f2ff] px-1.5 py-0.5 rounded border border-[#00f2ff]/20">PRO</span>
-            </div>
-            <span className="text-[9px] text-[#39ff14] font-bold tracking-[0.3em] uppercase opacity-80">
-              Live_Uplink / {data.length} Bars
-            </span>
-          </div>
-
-          <div className="w-px h-8 bg-[#1c2127]/50" />
-
-          <TimeframeSelector selectedTimeframe={selectedTimeframe} onTimeframeChange={setSelectedTimeframe} />
-
-          <div className="w-px h-8 bg-[#1c2127]/50" />
-
-          {/* Indicator, Pattern & Grid toggle buttons */}
-          <div className="flex items-center gap-2">
-            <IndicatorPanel activeIndicators={activeIndicators} onToggle={(id, val) => setActiveIndicators(prev => ({ ...prev, [id]: val }))} />
-            <PatternPanel activePatterns={activePatterns} onToggle={(id, val) => setActivePatterns(prev => ({ ...prev, [id]: val }))} />
-            <div className="w-px h-6 bg-[#1c2127] mx-1" />
-            <button
-              onClick={() => setShowGrid(prev => !prev)}
-              className={`h-8 px-3 rounded flex items-center justify-center transition-all ${
-                showGrid ? 'bg-[#ff003c] text-white shadow-[0_0_10px_#ff003c44]' : 'bg-[#1c2127] text-[#848e9c] hover:bg-[#2a303c]'
-              }`}
-              title="Toggle Grid Lines"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                <line x1="3" y1="9" x2="21" y2="9"/>
-                <line x1="3" y1="15" x2="21" y2="15"/>
-                <line x1="9" y1="3" x2="9" y2="21"/>
-                <line x1="15" y1="3" x2="15" y2="21"/>
-              </svg>
-            </button>
-          </div>
-
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* Real-time Stats */}
-          <div className="flex items-center gap-6 text-[10px] font-bold">
-            <div className="flex flex-col items-end">
-              <span className="text-[#5d606b] text-[8px] uppercase">Active_Layer</span>
-              <span className="text-[#00f2ff]">{activeIndicatorCount} IND / {activePatternCount} PTRN</span>
-            </div>
-            {data.length > 0 && (
-              <div className="flex flex-col items-end">
-                <span className="text-[#5d606b] text-[8px] uppercase">Market_Price</span>
-                <span className="text-white text-lg tracking-tighter">
-                  {data[data.length - 1]?.close?.toFixed(2)}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="w-px h-8 bg-[#1c2127]/50" />
-
-          <div className="w-10 h-10 elite-button rounded-xl flex items-center justify-center cursor-pointer hover:shadow-[0_0_15px_#00f2ff33]">
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>
-          </div>
-        </div>
-
-        {/* Chart Area */}
         <div className="flex-1 min-height-0 relative bg-black">
-
-          {/* Loading System */}
-          {loading && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-12 h-12 border-2 border-[#00f2ff] border-t-transparent rounded-full animate-spin shadow-[0_0_20px_#00f2ff33]" />
-                <span className="text-[10px] tracking-[0.5em] text-[#00f2ff] font-bold animate-pulse">
-                  SYNCING_ASSETS_
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Error Handling */}
-          {error && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center p-6">
-              <div className="elite-panel border-[#ff003c55] p-8 max-w-sm text-center">
-                <div className="text-[10px] color-[#ff003c] font-black tracking-[0.2em] mb-4">
-                  CRITICAL_CONNECTION_FAILURE
-                </div>
-                <div className="text-sm text-[#848e9c] mb-6 leading-relaxed uppercase">{error}</div>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="w-full py-4 elite-button text-[#ff003c] border-[#ff003c33] rounded-lg tracking-widest text-[10px]"
+          {showOptionChain && fnoLogic.fnoExpiry ? (
+            <div className="absolute inset-0 z-20 bg-black/90 backdrop-blur-md p-6 overflow-hidden flex flex-col">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-[#00f2ff] font-bold text-xs tracking-widest uppercase">
+                  Option_Chain: {selectedSymbol} @ {fnoLogic.fnoExpiry}
+                </h3>
+                <button 
+                  onClick={() => setShowOptionChain(false)}
+                  className="px-3 py-1 bg-[#ff4d4d]/10 text-[#ff4d4d] border border-[#ff4d4d]/20 rounded text-[10px] font-bold hover:bg-[#ff4d4d]/20"
                 >
-                  REBOOT_ROXEY_
+                  CLOSE_X
                 </button>
               </div>
+              <div className="flex-1 overflow-hidden">
+                <OptionChainTable 
+                  symbol={selectedSymbol} 
+                  instrumentKey={
+                    selectedSymbol?.includes('|')
+                      ? selectedSymbol
+                      : ({
+                        NIFTY: 'NSE_INDEX|Nifty 50',
+                        BANKNIFTY: 'NSE_INDEX|Nifty Bank',
+                        FINNIFTY: 'NSE_INDEX|Nifty Fin Service',
+                        MIDCPNIFTY: 'NSE_INDEX|Nifty Mid Select',
+                      }[String(selectedSymbol || '').toUpperCase()] || `NSE_EQ|${String(selectedSymbol || '').toUpperCase()}`)
+                  }
+                  expiry={fnoLogic.fnoExpiry} 
+                  onSelectContract={(key) => {
+                    // Logic to handle contract selection from chain
+                    console.log('Selected contract:', key);
+                  }}
+                />
+              </div>
             </div>
-          )}
+          ) : null}
 
-          {/* No data state */}
-          {!loading && !error && data.length === 0 && (
-            <div className="flex items-center justify-center h-full">
-              <span className="text-[#1c2127] text-sm tracking-[0.4em] font-black italic">
-                [ NO_OHLCV_INTEL_CAPTURED ]
-              </span>
-            </div>
-          )}
-
-          {/* The Chart */}
-          {!loading && !error && data.length > 0 && (
-            <ChartErrorBoundary>
-              <CandlestickChart
-                data={data}
-                news={news}
-                symbol={selectedSymbol}
-              timeframe={selectedTimeframe}
-                activeIndicators={activeIndicators}
-                activePatterns={activePatterns}
-                showGrid={showGrid}
-              />
-            </ChartErrorBoundary>
-          )}
+          <MainChartArea 
+            loading={loading}
+            error={error}
+            data={data}
+            isFnoMode={fnoLogic.isFnoMode}
+            selectedSymbol={selectedSymbol}
+            selectedTimeframe={selectedTimeframe}
+            activeIndicators={activeIndicators}
+            activePatterns={activePatterns}
+            showGrid={showGrid}
+            onInfoClick={(sym) => { setSelectedSymbol(sym); setIsRightSidebarCollapsed(false); }}
+            fnoData={fnoData}
+            fnoStrike={fnoLogic.fnoStrike}
+          />
         </div>
 
-        {/* Terminal Status Bar */}
+        {/* Status Bar */}
         <div className="h-8 flex-shrink-0 bg-black border-t border-[#1c2127]/50 flex items-center justify-between px-6 text-[8px] font-mono tracking-widest text-[#333]">
           <div className="flex gap-6 items-center">
             <span className="text-[#39ff14] flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-[#39ff14] animate-pulse" />
               STATUS: NOMINAL
             </span>
-            <span>ENCRYPTION: SH-512</span>
-            <span>BUFFER: {Math.floor(data.length / 10)}MB</span>
+            <span>ENCRYPTION: SH-256</span>
+            <span>UPLINK: ACTIVE / {activeIndicatorCount}IND</span>
           </div>
-          <div className="flex gap-6 items-center">
-            <span className="text-[#5d606b]">OP: {currentUser.username}</span>
-            <button onClick={handleLogout} className="text-[#ff003c] hover:text-[#ff4d79] transition-colors">DISCONNECT</button>
-            <span className="text-[#00f2ff] font-bold bg-[#00f2ff]/5 px-2 py-0.5 rounded">ROXEY_EDITION_V7.2</span>
-          </div>
+          <span className="text-[#00f2ff] font-bold bg-[#00f2ff]/5 px-2 py-0.5 rounded uppercase tracking-[0.2em]">ROXEY_PRO_EDITION_V8.5_REFACTORED</span>
         </div>
       </div>
 
-
-      {/* ── Right Intelligence Panel ──────────────────────────────────────── */}
-      <div className={`${isRightSidebarCollapsed ? 'w-12' : 'w-72'} flex-shrink-0 flex flex-col bg-black border-l border-[#1c2127] transition-all duration-200`}>
+      {/* Right Sidebar */}
+      <div className={`${isRightSidebarCollapsed ? 'w-12' : 'w-72'} flex-shrink-0 flex flex-col bg-black border-l border-[#1c2127] transition-all duration-200 z-[100]`}>
         <div className="flex border-b border-[#1c2127] flex-shrink-0 bg-[#050505]">
-          <button
-            onClick={() => setIsRightSidebarCollapsed((prev) => !prev)}
-            className="px-2 text-[#848e9c] hover:text-[#00f2ff] transition-colors"
-            title={isRightSidebarCollapsed ? 'Expand intelligence panel (Ctrl+I)' : 'Collapse intelligence panel (Ctrl+I)'}
-          >
-            {isRightSidebarCollapsed ? '«' : '»'}
-          </button>
+          <button onClick={() => setIsRightSidebarCollapsed(p => !p)} className="px-2 w-12 text-[#848e9c] hover:text-[#00f2ff] transition-colors text-lg italic font-serif">i</button>
           {!isRightSidebarCollapsed && ['news', 'trades', 'research'].map(panel => (
-            <button
-              key={panel}
-              onClick={() => setActiveRightPanel(panel)}
-              className={`flex-1 py-4 text-[9px] font-black uppercase tracking-[0.2em] transition-all cursor-pointer ${
-                activeRightPanel === panel 
-                  ? 'text-[#00f2ff] border-b-2 border-[#00f2ff] bg-[#00f2ff]/5' 
-                  : 'text-[#5d606b] border-b-2 border-transparent hover:text-[#848e9c]'
-              }`}
-            >
-              {panel === 'news' ? 'Market_Intel' : panel === 'trades' ? 'SMC_Alpha' : 'Quantum_Alpha'}
+            <button key={panel} onClick={() => setActiveRightPanel(panel)} className={`flex-1 py-4 text-[8px] font-black uppercase tracking-[0.2em] transition-all ${activeRightPanel === panel ? 'text-[#00f2ff] border-b-2 border-[#00f2ff] bg-[#00f2ff]/5' : 'text-[#5d606b] border-b-2 border-transparent hover:text-[#848e9c]'}`}>
+              {panel === 'news' ? 'Intel' : panel === 'trades' ? 'SMC' : 'Alpha'}
             </button>
           ))}
         </div>
-        {!isRightSidebarCollapsed && <div className="flex-1 overflow-hidden">
-          {activeRightPanel === 'news' ? (
-            <NewsList selectedSymbol={selectedSymbol} /> 
-          ) : activeRightPanel === 'trades' ? (
-            <TradeFeed trades={smcData.suggestions} />
-          ) : (
-            <ResearchPanel selectedSymbol={selectedSymbol} />
-          )}
-        </div>}
+        {!isRightSidebarCollapsed && (
+          <div className="flex-1 overflow-hidden">
+            {activeRightPanel === 'news' && <NewsList selectedSymbol={selectedSymbol} />}
+            {activeRightPanel === 'trades' && <TradeFeed trades={smcData.suggestions} />}
+            {activeRightPanel === 'research' && <ResearchPanel selectedSymbol={selectedSymbol} />}
+          </div>
+        )}
       </div>
-
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }

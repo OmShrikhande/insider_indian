@@ -87,6 +87,40 @@ router.get('/ohlcv', async (req, res) => {
   }
 });
 
+// Raw Option Chain API:
+// GET /api/fno/option-chain?instrument_key=NSE_INDEX|Nifty 50&expiry_date=2026-04-28
+// Returns the same nested shape as Upstox /v2/option/chain response.
+router.get('/option-chain', async (req, res) => {
+  const { instrument_key: instrumentKey = '', expiry_date: expiryDate = '' } = req.query;
+  if (!instrumentKey || !expiryDate) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required query params: instrument_key and expiry_date',
+    });
+  }
+
+  try {
+    let result = await fnoService.getOptionChainRaw(String(instrumentKey), String(expiryDate));
+
+    // If not present in DB, fetch from Upstox once and store.
+    if (!result.success || !Array.isArray(result.data) || result.data.length === 0) {
+      result = await fnoService.syncAndGetOptionChainRaw(String(instrumentKey), String(expiryDate));
+    }
+
+    if (!result.success) {
+      return res.status(500).json(result);
+    }
+
+    return res.json({
+      status: 'success',
+      data: result.data,
+      stale: Boolean(result.stale),
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Get Option Chain
 router.get('/option-chain/:symbol/:expiry', async (req, res) => {
   const { symbol, expiry } = req.params;

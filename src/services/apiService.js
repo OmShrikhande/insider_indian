@@ -110,6 +110,60 @@ class ApiService {
     return this.request(`/api/fno/pcr?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(expiry)}`);
   }
 
+  async getFnoOhlcv(underlying, expiry, strike, timeframe = '1h') {
+    return this.request(`/api/fno/ohlcv?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(expiry)}&strike=${encodeURIComponent(strike)}&timeframe=${encodeURIComponent(timeframe)}`);
+  }
+
+  async getOptionChain(symbol, expiry) {
+    if (!symbol || !expiry) throw new Error('Symbol and Expiry are required');
+    return this.request(`/api/fno/option-chain/${symbol}/${expiry}`);
+  }
+
+  resolveFnoInstrumentKey(symbol) {
+    const value = String(symbol || '').trim();
+    if (!value) return '';
+    if (value.includes('|')) return value;
+
+    const keyMap = {
+      NIFTY: 'NSE_INDEX|Nifty 50',
+      BANKNIFTY: 'NSE_INDEX|Nifty Bank',
+      FINNIFTY: 'NSE_INDEX|Nifty Fin Service',
+      MIDCPNIFTY: 'NSE_INDEX|Nifty Mid Select',
+    };
+
+    const upper = value.toUpperCase();
+    if (keyMap[upper]) return keyMap[upper];
+    return `NSE_EQ|${upper}`;
+  }
+
+  async getOptionChainByInstrument(instrumentKey, expiryDate) {
+    if (!instrumentKey || !expiryDate) {
+      throw new Error('instrumentKey and expiryDate are required');
+    }
+    return this.request(
+      `/api/fno/option-chain?instrument_key=${encodeURIComponent(instrumentKey)}&expiry_date=${encodeURIComponent(expiryDate)}`
+    );
+  }
+
+  getStockStreamUrl(symbol, timeframe = '1h', limit = 3000) {
+    const params = new URLSearchParams({
+      symbol,
+      timeframe,
+      limit: String(limit)
+    });
+    return `${this.baseURL}/api/live/stream/stocks?${params.toString()}`;
+  }
+
+  getFnoStreamUrl(underlying, expiry, strike, timeframe = '1h') {
+    const params = new URLSearchParams({
+      underlying,
+      expiry,
+      strike: String(strike),
+      timeframe
+    });
+    return `${this.baseURL}/api/live/stream/fno-ohlcv?${params.toString()}`;
+  }
+
   async getDataSources() {
     return this.request('/api/system/sources');
   }

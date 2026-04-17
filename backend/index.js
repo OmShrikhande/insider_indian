@@ -138,6 +138,7 @@ async function setupDatabase() {
       ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (trading_date, exchange)`,
       `CREATE TABLE IF NOT EXISTS fno_option_chain (
         underlying_symbol String,
+        underlying_key String DEFAULT '',
         expiry Date,
         strike_price Float64,
         pcr Float64,
@@ -145,6 +146,7 @@ async function setupDatabase() {
         call_key String,
         call_ltp Float64,
         call_oi UInt64,
+        call_volume UInt64,
         call_delta Float64,
         call_theta Float64,
         call_gamma Float64,
@@ -153,11 +155,15 @@ async function setupDatabase() {
         put_key String,
         put_ltp Float64,
         put_oi UInt64,
+        put_volume UInt64,
         put_delta Float64,
         put_theta Float64,
         put_gamma Float64,
         put_vega Float64,
         put_iv Float64,
+        call_options_json String DEFAULT '',
+        put_options_json String DEFAULT '',
+        rate_type String DEFAULT 'REAL',
         updated_at DateTime
       ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (underlying_symbol, expiry, strike_price)`
     ];
@@ -208,10 +214,76 @@ async function setupDatabase() {
       console.log(`Stock population check failed: ${error.message}`);
     }
 
+    // Populate F&O option-chain demo rows if empty.
+    try {
+      const fnoCountResult = await client.query({
+        query: 'SELECT count() as count FROM fno_option_chain',
+        format: 'JSONEachRow'
+      });
+      const fnoCountData = await fnoCountResult.json();
+      const fnoCount = fnoCountData[0]?.count || 0;
+
+      if (fnoCount === 0) {
+        const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+        const expiry = '2026-04-30';
+        const spot = 22435.5;
+        const demoChain = [
+          { strike: 22200, ceLtp: 289.8, ceOi: 124500, ceVol: 44600, peLtp: 63.1, peOi: 115400, peVol: 30100 },
+          { strike: 22300, ceLtp: 236.2, ceOi: 141200, ceVol: 53200, peLtp: 78.4, peOi: 133900, peVol: 35600 },
+          { strike: 22400, ceLtp: 186.7, ceOi: 178400, ceVol: 71200, peLtp: 102.9, peOi: 169500, peVol: 48900 },
+          { strike: 22500, ceLtp: 142.3, ceOi: 201700, ceVol: 80100, peLtp: 134.6, peOi: 194800, peVol: 55700 },
+          { strike: 22600, ceLtp: 106.4, ceOi: 167900, ceVol: 63300, peLtp: 172.8, peOi: 182400, peVol: 51100 },
+          { strike: 22700, ceLtp: 77.6, ceOi: 139300, ceVol: 50200, peLtp: 218.2, peOi: 154700, peVol: 42800 }
+        ].map((row) => ({
+          underlying_symbol: 'NIFTY',
+          expiry,
+          strike_price: row.strike,
+          pcr: 0.96,
+          underlying_spot_price: spot,
+          call_key: `NSE_FO|NIFTY${expiry.replace(/-/g, '')}${row.strike}CE`,
+          call_ltp: row.ceLtp,
+          call_oi: row.ceOi,
+          call_volume: row.ceVol,
+          call_delta: 0.45,
+          call_theta: -8.5,
+          call_gamma: 0.0009,
+          call_vega: 12.1,
+          call_iv: 14.8,
+          put_key: `NSE_FO|NIFTY${expiry.replace(/-/g, '')}${row.strike}PE`,
+          put_ltp: row.peLtp,
+          put_oi: row.peOi,
+          put_volume: row.peVol,
+          put_delta: -0.46,
+          put_theta: -8.1,
+          put_gamma: 0.0009,
+          put_vega: 12.4,
+          put_iv: 15.1,
+          rate_type: 'REAL',
+          updated_at: now
+        }));
+
+        await client.insert({
+          table: 'fno_option_chain',
+          values: demoChain,
+          format: 'JSONEachRow'
+        });
+
+        console.log(`✅ Inserted ${demoChain.length} demo F&O option-chain rows into fno_option_chain`);
+      }
+    } catch (error) {
+      console.log(`F&O demo population check failed: ${error.message}`);
+    }
+
     // Execute migrations/alters for existing tables
     const migrationQueries = [
       'ALTER TABLE stocks_summary ADD COLUMN IF NOT EXISTS sector String DEFAULT \'\'',
-      'ALTER TABLE stocks_summary ADD COLUMN IF NOT EXISTS instrument_key String DEFAULT \'\''
+      'ALTER TABLE stocks_summary ADD COLUMN IF NOT EXISTS instrument_key String DEFAULT \'\'',
+      'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS underlying_key String DEFAULT \'\'',
+      'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS call_volume UInt64 DEFAULT 0',
+      'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS put_volume UInt64 DEFAULT 0',
+      'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS call_options_json String DEFAULT \'\'',
+      'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS put_options_json String DEFAULT \'\'',
+      'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS rate_type String DEFAULT \'REAL\''
     ];
 
     for (const q of migrationQueries) {

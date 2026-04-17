@@ -47,7 +47,7 @@ class UpstoxSyncService {
   }
 
   shouldRun() { return process.env.ENABLE_UPSTOX_SYNC === 'true'; }
-  hasCredentials() { return Boolean(process.env.UPSTOX_ACCESS_TOKEN); }
+  hasCredentials() { return Boolean(process.env.UPSTOX_ACCESS_TOKEN || process.env.UPSTOX_API_KEY); }
 
   async init() {
     if (!this.shouldRun()) return console.log('[UpstoxSync] Disabled.');
@@ -57,7 +57,11 @@ class UpstoxSyncService {
     if (!dbConnected) return console.warn('[UpstoxSync] Database not available.');
 
     console.log('[UpstoxSync] Initializing background sync jobs...');
-    await this.runAllTimeframes();
+    if (process.env.UPSTOX_SYNC_RUN_ON_STARTUP === 'true') {
+      await this.runAllTimeframes();
+    } else {
+      console.log('[UpstoxSync] Startup full sync skipped. Set UPSTOX_SYNC_RUN_ON_STARTUP=true to enable.');
+    }
 
     this.intervals.push(setInterval(() => this.syncTimeframe('15m'), 15 * 60 * 1000));
     this.intervals.push(setInterval(() => {
@@ -98,6 +102,11 @@ class UpstoxSyncService {
       const lookback = timeframe === '15m' ? 30 : (timeframe === '1h' ? 90 : 365);
 
       for (const stock of stocks) {
+        if (upstoxApi.isRateLimitedNow()) {
+          const remainingSec = Math.ceil(upstoxApi.getRateLimitRemainingMs() / 1000);
+          console.warn(`[UpstoxSync] Upstox cooldown active (${remainingSec}s). Pausing ${timeframe} sync loop.`);
+          break;
+        }
         try {
           // ROAST FIX: Persistent Caching. check memory -> check DB -> search Upstox
           let instrumentKey = this.instrumentCache.get(stock.symbol) || stock.instrument_key;
@@ -155,7 +164,7 @@ class UpstoxSyncService {
         } catch (e) {
           console.warn(`[UpstoxSync] Error syncing ${stock.symbol}:`, e.message);
         }
-        await new Promise(r => setTimeout(r, 250)); // Increased Throttling (250ms) to respect Upstox Rate Limits
+        await new Promise(r => setTimeout(r, 800)); // Heavier throttle to avoid Cloudflare 1015 bursts
       }
     } finally {
       this.isSyncing[timeframe] = false;
@@ -197,7 +206,7 @@ class UpstoxSyncService {
             ORDER BY expiry ASC, abs(strike - {ltp:Float64}) ASC
             LIMIT 10
           `,
-          query_params: { u: index.toUpperCase(), ltp },
+          query_params: { u: rawIndex.toUpperCase(), ltp },
           format: 'JSONEachRow'
         });
         const contracts = await res.json();
@@ -213,7 +222,7 @@ class UpstoxSyncService {
           }
         }
       } catch (err) {
-        console.warn(`[UpstoxSync] FNO sync failed for ${index}:`, err.message);
+        console.warn(`[UpstoxSync] FNO sync failed for ${rawIndex}:`, err.message);
       }
     }
   }

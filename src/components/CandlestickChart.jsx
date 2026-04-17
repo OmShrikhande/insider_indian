@@ -12,7 +12,7 @@ import { scanPatterns } from '../lib/patterns';
 import { detectSMC } from '../lib/smc';
 import { calculateVolumeProfile } from '../lib/volumeProfile';
 
-const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, activePatterns, showGrid }) => {
+const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, activePatterns, showGrid, onInfoClick }) => {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const candleRef = useRef(null);
@@ -825,6 +825,21 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
 
       {/* The actual chart — fills 100% of parent */}
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+
+      {/* Info Button - Right Corner */}
+      <button 
+        onClick={(e) => {
+          e.stopPropagation();
+          if (onInfoClick) onInfoClick(symbol);
+          else {
+            window.dispatchEvent(new CustomEvent('roxey-info-click', { detail: { symbol } }));
+          }
+        }}
+        className="absolute top-2 right-2 z-40 w-6 h-6 bg-black/60 border border-[#1c2127] text-[#848e9c] hover:text-[#00f2ff] hover:border-[#00f2ff] flex items-center justify-center rounded font-serif italic font-bold text-xs transition-all shadow-lg"
+        title={`Info for ${symbol}`}
+      >
+        i
+      </button>
     </div>
   );
 };
