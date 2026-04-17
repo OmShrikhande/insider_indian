@@ -73,4 +73,41 @@ router.post('/sync/admin', protect, requireAdmin, async (req, res) => {
   }
 });
 
+router.get('/ohlcv', async (req, res) => {
+  try {
+    const { underlying, expiry, strike, timeframe = '1h' } = req.query;
+    if (!underlying || !expiry || !strike) {
+        return res.status(400).json({ success: false, error: 'Missing required parameters: underlying, expiry, strike' });
+    }
+    const data = await fnoService.getOptionsOhlcv(underlying, expiry, strike, timeframe);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('FNO OHLCV fetch error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch FNO OHLCV data' });
+  }
+});
+
+// Get Option Chain
+router.get('/option-chain/:symbol/:expiry', async (req, res) => {
+  const { symbol, expiry } = req.params;
+  try {
+    let result = await fnoService.getOptionChain(symbol.toUpperCase(), expiry);
+    
+    // If no data, try to sync once
+    if (!result.success || !result.data || result.data.length === 0) {
+      console.log(`[FNO Route] No stored chain for ${symbol} @ ${expiry}. Syncing...`);
+      await fnoService.syncOptionChain(symbol.toUpperCase(), expiry);
+      result = await fnoService.getOptionChain(symbol.toUpperCase(), expiry);
+    }
+
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 module.exports = router;

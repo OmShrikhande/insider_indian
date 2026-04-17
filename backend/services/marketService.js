@@ -16,7 +16,9 @@ class MarketService {
     if (!this.shouldRun()) return [];
 
     try {
-      const url = `${process.env.UPSTOX_BASE_URL || 'https://api.upstox.com'}/v2/market/holidays`;
+      // ROAST FIX: Fixed v2 endpoint construction to prevent /v3/v2/ concatenations
+      const baseUrl = 'https://api.upstox.com/v2';
+      const url = `${baseUrl}/market/holidays`;
 
       const response = await fetch(url, {
         headers: {
@@ -68,7 +70,9 @@ class MarketService {
     const targetDate = date || new Date().toISOString().split('T')[0];
 
     try {
-      const url = `${process.env.UPSTOX_BASE_URL || 'https://api.upstox.com'}/v2/market/timings/${targetDate}`;
+      // ROAST FIX: Fixed v2 endpoint construction
+      const baseUrl = 'https://api.upstox.com/v2';
+      const url = `${baseUrl}/market/timings/${targetDate}`;
 
       const response = await fetch(url, {
         headers: {

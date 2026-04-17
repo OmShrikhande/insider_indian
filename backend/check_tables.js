@@ -84,6 +84,46 @@ async function createTableIfNotExists(tableName, createQuery) {
       ORDER BY timestamp
     `);
 
+    // Create fno_15min table
+    await createTableIfNotExists('fno_15min', `
+      CREATE TABLE IF NOT EXISTS fno_15min (
+        date DateTime,
+        open Float64,
+        high Float64,
+        low Float64,
+        close Float64,
+        volume UInt64,
+        instrument_key String,
+        trading_symbol String,
+        underlying_symbol String,
+        expiry Date,
+        strike Float64,
+        option_type String,
+        timeframe String
+      ) ENGINE = MergeTree()
+      ORDER BY (instrument_key, date)
+    `);
+
+    // Create fno_hourly table
+    await createTableIfNotExists('fno_hourly', `
+      CREATE TABLE IF NOT EXISTS fno_hourly (
+        date DateTime,
+        open Float64,
+        high Float64,
+        low Float64,
+        close Float64,
+        volume UInt64,
+        instrument_key String,
+        trading_symbol String,
+        underlying_symbol String,
+        expiry Date,
+        strike Float64,
+        option_type String,
+        timeframe String
+      ) ENGINE = MergeTree()
+      ORDER BY (instrument_key, date)
+    `);
+
     // Show all tables
     const result = await client.query({
       query: 'SHOW TABLES',

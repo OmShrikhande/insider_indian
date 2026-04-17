@@ -88,7 +88,7 @@ async function setupDatabase() {
 
     // Create tables
     const createQueries = [
-      `CREATE TABLE IF NOT EXISTS stocks_summary (symbol String, sector String) ENGINE = MergeTree() ORDER BY symbol`,
+      `CREATE TABLE IF NOT EXISTS stocks_summary (symbol String, sector String, instrument_key String DEFAULT '') ENGINE = MergeTree() ORDER BY symbol`,
       `CREATE TABLE IF NOT EXISTS stocks_15min (date DateTime, open Float64, high Float64, low Float64, close Float64, volume UInt64, symbol String, timeframe String, sector String) ENGINE = MergeTree() ORDER BY (symbol, date)`,
       `CREATE TABLE IF NOT EXISTS stocks_hourly (date DateTime, open Float64, high Float64, low Float64, close Float64, volume UInt64, symbol String, timeframe String, sector String) ENGINE = MergeTree() ORDER BY (symbol, date)`,
       `CREATE TABLE IF NOT EXISTS stocks_daily (date DateTime, open Float64, high Float64, low Float64, close Float64, volume UInt64, symbol String, timeframe String, sector String) ENGINE = MergeTree() ORDER BY (symbol, date)`,
@@ -135,12 +135,36 @@ async function setupDatabase() {
         start_time DateTime,
         end_time DateTime,
         updated_at DateTime
-      ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (trading_date, exchange)`
+      ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (trading_date, exchange)`,
+      `CREATE TABLE IF NOT EXISTS fno_option_chain (
+        underlying_symbol String,
+        expiry Date,
+        strike_price Float64,
+        pcr Float64,
+        underlying_spot_price Float64,
+        call_key String,
+        call_ltp Float64,
+        call_oi UInt64,
+        call_delta Float64,
+        call_theta Float64,
+        call_gamma Float64,
+        call_vega Float64,
+        call_iv Float64,
+        put_key String,
+        put_ltp Float64,
+        put_oi UInt64,
+        put_delta Float64,
+        put_theta Float64,
+        put_gamma Float64,
+        put_vega Float64,
+        put_iv Float64,
+        updated_at DateTime
+      ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (underlying_symbol, expiry, strike_price)`
     ];
 
     for (const query of createQueries) {
       try {
-        await client.exec({ query });
+        await client.command({ query });
       } catch (error) {
         console.log(`Table creation failed: ${error.message}`);
       }
@@ -184,7 +208,22 @@ async function setupDatabase() {
       console.log(`Stock population check failed: ${error.message}`);
     }
 
-    console.log('✅ Database tables setup complete');
+    // Execute migrations/alters for existing tables
+    const migrationQueries = [
+      'ALTER TABLE stocks_summary ADD COLUMN IF NOT EXISTS sector String DEFAULT \'\'',
+      'ALTER TABLE stocks_summary ADD COLUMN IF NOT EXISTS instrument_key String DEFAULT \'\''
+    ];
+
+    for (const q of migrationQueries) {
+      try {
+        await client.command({ query: q });
+      } catch (err) {
+        // Silently continue if column already exists or other minor error
+        console.debug(`[Migration] Warning: ${err.message}`);
+      }
+    }
+
+    console.log('✅ Database setup and migrations complete');
   } catch (error) {
     console.error('Database setup failed:', error);
   }

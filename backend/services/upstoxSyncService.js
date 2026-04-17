@@ -1,341 +1,89 @@
 const { client, testConnection } = require('../config/database');
+const upstoxApi = require('./upstoxApiService');
+const fnoService = require('./fnoService');
 
+/**
+ * UpstoxSyncService - Handles background data synchronization.
+ * ROAST FIX: Eliminated redundant fetching/normalization logic by delegating to UpstoxApiService and FnoService.
+ */
 class UpstoxSyncService {
   constructor() {
-    this.isSyncing = {
-      '15m': false,
-      '1h': false,
-      '1d': false,
-    };
+    this.isSyncing = { '15m': false, '1h': false, '1d': false };
     this.intervals = [];
-    this.instrumentCache = new Map(); // Cache symbol -> instrument_key mappings
+    this.instrumentCache = new Map();
   }
 
-  shouldRun() {
-    return process.env.ENABLE_UPSTOX_SYNC === 'true';
+  resampleCandles(rawCandles, timeframe) {
+    if (!rawCandles.length || timeframe === '1d' || timeframe === '30m' || timeframe === '1m') {
+      return rawCandles;
+    }
+    const minutes = timeframe === '15m' ? 15 : 60;
+    const resampled = [];
+    const sorted = [...rawCandles].reverse();
+    let currentBucket = [];
+    for (const candle of sorted) {
+      const date = new Date(candle[0]);
+      const bucketTimestamp = Math.floor(date.getTime() / (minutes * 60 * 1000)) * (minutes * 60 * 1000);
+      if (currentBucket.length === 0 || currentBucket[0].bucket === bucketTimestamp) {
+        currentBucket.push({ candle, bucket: bucketTimestamp });
+      } else {
+        resampled.push(this.summarizeBucket(currentBucket));
+        currentBucket = [{ candle, bucket: bucketTimestamp }];
+      }
+    }
+    if (currentBucket.length > 0) resampled.push(this.summarizeBucket(currentBucket));
+    return resampled.reverse();
   }
 
-  hasCredentials() {
-    return Boolean(process.env.UPSTOX_API_KEY || process.env.UPSTOX_ACCESS_TOKEN);
+  summarizeBucket(bucket) {
+    const candles = bucket.map(b => b.candle);
+    let high = -Infinity, low = Infinity, vol = 0;
+    for (const c of candles) {
+      if (c[2] > high) high = c[2];
+      if (c[3] < low) low = c[3];
+      vol += (c[5] || 0);
+    }
+    return [new Date(bucket[0].bucket).toISOString(), candles[0][1], high, low, candles[candles.length - 1][4], vol, candles[candles.length - 1][6]];
   }
+
+  shouldRun() { return process.env.ENABLE_UPSTOX_SYNC === 'true'; }
+  hasCredentials() { return Boolean(process.env.UPSTOX_ACCESS_TOKEN); }
 
   async init() {
-    if (!this.shouldRun()) {
-      console.log('[UpstoxSync] Disabled (ENABLE_UPSTOX_SYNC=false).');
-      return;
-    }
+    if (!this.shouldRun()) return console.log('[UpstoxSync] Disabled.');
+    if (!this.hasCredentials()) return console.warn('[UpstoxSync] Missing credentials.');
 
-    if (!this.hasCredentials()) {
-      console.warn('[UpstoxSync] Missing credentials. Set UPSTOX_API_KEY or UPSTOX_ACCESS_TOKEN.');
-      return;
-    }
-
-    // Check database connection before starting sync
     const dbConnected = await testConnection();
-    if (!dbConnected) {
-      console.warn('[UpstoxSync] Database not available. Skipping sync initialization.');
-      return;
-    }
+    if (!dbConnected) return console.warn('[UpstoxSync] Database not available.');
 
     console.log('[UpstoxSync] Initializing background sync jobs...');
     await this.runAllTimeframes();
 
     this.intervals.push(setInterval(() => this.syncTimeframe('15m'), 15 * 60 * 1000));
-    this.intervals.push(setInterval(() => this.syncTimeframe('1h'), 60 * 60 * 1000));
+    this.intervals.push(setInterval(() => {
+      this.syncTimeframe('1h');
+      this.syncFnoATM();
+    }, 60 * 60 * 1000));
     this.intervals.push(setInterval(() => this.syncTimeframe('1d'), 24 * 60 * 60 * 1000));
+    
+    this.syncFnoATM();
   }
 
   async runAllTimeframes() {
-    await this.syncTimeframe('15m');
-    await this.syncTimeframe('1h');
-    await this.syncTimeframe('1d');
+    await Promise.all([this.syncTimeframe('15m'), this.syncTimeframe('1h'), this.syncTimeframe('1d')]);
   }
 
   async getTrackedStocks() {
-    // First try to get symbols from stocks_summary (which has the master list)
-    // Limit to top 300 stocks for sync to match user requirements
-    const primaryQuery = `
-      SELECT
-        symbol,
-        '' AS sector
-      FROM stocks_summary
-      ORDER BY symbol
-      LIMIT 300
-    `;
-
+    // Limited to top 300 stocks for sync performance
+    const q = 'SELECT symbol, sector, instrument_key FROM stocks_summary ORDER BY symbol LIMIT 300';
     try {
-      const result = await client.query({
-        query: primaryQuery,
-        format: 'JSONEachRow',
-      });
+      const result = await client.query({ query: q, format: 'JSONEachRow' });
       const rows = await result.json();
       if (rows.length > 0) return rows;
-    } catch (error) {
-      console.warn('[UpstoxSync] stocks_summary lookup failed, falling back to stocks_hourly.', error.message);
+    } catch (e) {
+      console.warn('[UpstoxSync] Summary lookup failed, falling back...');
     }
-
-    // Fallback: get symbols from existing hourly data
-    const fallbackQuery = `
-      SELECT DISTINCT
-        symbol,
-        '' AS sector
-      FROM stocks_hourly
-      ORDER BY symbol
-    `;
-    try {
-      const fallbackResult = await client.query({
-        query: fallbackQuery,
-        format: 'JSONEachRow',
-      });
-      const rows = await fallbackResult.json();
-      if (rows.length > 0) return rows;
-    } catch (error) {
-      console.warn('[UpstoxSync] stocks_hourly lookup also failed.', error.message);
-    }
-
-    // Last resort: use a hardcoded list of common Indian stocks
-    console.log('[UpstoxSync] Using hardcoded list of common Indian stocks');
-    const commonStocks = [
-      'RELIANCE', 'TCS', 'HDFCBANK', 'ICICIBANK', 'INFY', 'HINDUNILVR', 'ITC', 'KOTAKBANK',
-      'LT', 'AXISBANK', 'MARUTI', 'BAJFINANCE', 'BHARTIARTL', 'WIPRO', 'HCLTECH', 'NTPC',
-      'POWERGRID', 'ONGC', 'COALINDIA', 'GAIL', 'DRREDDY', 'SUNPHARMA', 'CIPLA', 'DIVISLAB'
-    ];
-
-    // Use common stocks as fallback, but limit to top 300 for sync
-    const limitedStocks = commonStocks.slice(0, 300);
-    return limitedStocks.map(symbol => ({ symbol, sector: '' }));
-  }
-
-  getTimeframeConfig(timeframe) {
-    if (timeframe === '15m') {
-      return { unit: 'minutes', interval: '15', table: 'stocks_15min', lookbackDays: 30 }; // 1 month max for 15m
-    }
-    if (timeframe === '1h') {
-      return { unit: 'hours', interval: '1', table: 'stocks_hourly', lookbackDays: 90 }; // 3 months for 1h
-    }
-    return { unit: 'days', interval: '1', table: 'stocks_daily', lookbackDays: 365 }; // 1 year for daily
-  }
-
-  formatDateOnly(date) {
-    return date.toISOString().slice(0, 10);
-  }
-
-  formatDateTime(date) {
-    return date.toISOString().replace('T', ' ').slice(0, 19);
-  }
-
-  async searchInstrumentKey(symbol, retryCount = 0) {
-    const maxRetries = 3;
-
-    // Check cache first
-    if (this.instrumentCache.has(symbol)) {
-      return this.instrumentCache.get(symbol);
-    }
-
-    try {
-      const url = `${process.env.UPSTOX_BASE_URL.replace('v3', 'v2')}/instruments/search?query=${encodeURIComponent(symbol)}&exchanges=NSE&segments=EQ&records=1`;
-
-      const headers = {
-        Accept: 'application/json',
-      };
-
-      if (process.env.UPSTOX_ACCESS_TOKEN) {
-        headers.Authorization = `Bearer ${process.env.UPSTOX_ACCESS_TOKEN}`;
-      }
-
-      const response = await fetch(url, { headers });
-      if (!response.ok) {
-        console.error(`[UpstoxSync] Instrument search failed for ${symbol}: HTTP ${response.status}`);
-
-        // Retry on rate limit or server errors
-        if ((response.status === 429 || response.status >= 500) && retryCount < maxRetries) {
-          const delay = Math.pow(2, retryCount) * 1000;
-          console.log(`[UpstoxSync] Retrying instrument search for ${symbol} in ${delay}ms (attempt ${retryCount + 1}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return this.searchInstrumentKey(symbol, retryCount + 1);
-        }
-
-        return null;
-      }
-
-      const payload = await response.json();
-      const instruments = payload?.data || [];
-
-      // Find the NSE_EQ instrument
-      const nseInstrument = instruments.find(inst => inst.segment === 'NSE_EQ');
-
-      if (nseInstrument) {
-        const instrumentKey = nseInstrument.instrument_key;
-        this.instrumentCache.set(symbol, instrumentKey);
-        console.log(`[UpstoxSync] Found instrument key for ${symbol}: ${instrumentKey}`);
-        return instrumentKey;
-      }
-
-      console.warn(`[UpstoxSync] No NSE_EQ instrument found for ${symbol}`);
-      return null;
-    } catch (error) {
-      console.error(`[UpstoxSync] Error searching instrument for ${symbol}:`, error.message);
-
-      // Retry on network errors
-      if (retryCount < maxRetries && (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND'))) {
-        const delay = Math.pow(2, retryCount) * 1000;
-        console.log(`[UpstoxSync] Network error in instrument search, retrying ${symbol} in ${delay}ms (attempt ${retryCount + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return this.searchInstrumentKey(symbol, retryCount + 1);
-      }
-
-      return null;
-    }
-  }
-
-  toUpstoxInstrumentKey(symbol) {
-    const direct = process.env.UPSTOX_INSTRUMENT_DIRECT === 'true';
-    if (direct) return symbol;
-    const prefix = process.env.UPSTOX_INSTRUMENT_PREFIX || 'NSE_EQ|';
-    return `${prefix}${symbol}`;
-  }
-
-  async fetchCandles(symbol, timeframe, retryCount = 0) {
-    const maxRetries = 3;
-    const { unit, interval, lookbackDays } = this.getTimeframeConfig(timeframe);
-    const toDate = new Date();
-    const fromDate = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
-
-    try {
-      // Get the correct instrument key
-      const instrumentKey = await this.searchInstrumentKey(symbol);
-      if (!instrumentKey) {
-        throw new Error(`Could not find instrument key for symbol: ${symbol}`);
-      }
-
-      const encodedInstrumentKey = encodeURIComponent(instrumentKey);
-      const url = `${process.env.UPSTOX_BASE_URL || 'https://api.upstox.com/v2'}/historical-candle/${encodedInstrumentKey}/${unit}/${interval}/${this.formatDateOnly(toDate)}/${this.formatDateOnly(fromDate)}`;
-
-      const headers = {
-        Accept: 'application/json',
-      };
-
-      if (process.env.UPSTOX_ACCESS_TOKEN) {
-        headers.Authorization = `Bearer ${process.env.UPSTOX_ACCESS_TOKEN}`;
-      }
-
-      const response = await fetch(url, { headers });
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[UpstoxSync] API Error for ${symbol} ${timeframe}: HTTP ${response.status} - ${errorText}`);
-
-        // Retry on rate limit or server errors
-        if ((response.status === 429 || response.status >= 500) && retryCount < maxRetries) {
-          const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
-          console.log(`[UpstoxSync] Retrying ${symbol} ${timeframe} in ${delay}ms (attempt ${retryCount + 1}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return this.fetchCandles(symbol, timeframe, retryCount + 1);
-        }
-
-        throw new Error(`HTTP ${response.status} for ${symbol} ${timeframe}: ${errorText}`);
-      }
-
-      const payload = await response.json();
-      const candles = payload?.data?.candles || payload?.candles || [];
-      return candles;
-    } catch (error) {
-      if (retryCount < maxRetries && (error.message.includes('ECONNREFUSED') || error.message.includes('ENOTFOUND'))) {
-        const delay = Math.pow(2, retryCount) * 1000;
-        console.log(`[UpstoxSync] Network error, retrying ${symbol} ${timeframe} in ${delay}ms (attempt ${retryCount + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return this.fetchCandles(symbol, timeframe, retryCount + 1);
-      }
-      throw error;
-    }
-  }
-
-  normalizeCandle(raw) {
-    if (!Array.isArray(raw) || raw.length < 6) return null;
-    const [ts, open, high, low, close, volume] = raw;
-
-    try {
-      let timestampMs;
-
-      // Handle different timestamp formats from Upstox API
-      if (typeof ts === 'string') {
-        // Try parsing as number first (string number)
-        const numTs = Number(ts);
-        if (!Number.isNaN(numTs)) {
-          ts = numTs;
-        } else {
-          // ISO string format - assume it's already in IST
-          const date = new Date(ts);
-          if (Number.isNaN(date.getTime())) return null;
-          timestampMs = date.getTime();
-        }
-      }
-
-      if (typeof ts === 'number') {
-        if (ts > 1e10) {
-          // Unix milliseconds - Upstox returns these in IST
-          timestampMs = ts;
-        } else {
-          // Unix seconds - convert to milliseconds
-          timestampMs = ts * 1000;
-        }
-      }
-
-      if (!timestampMs || Number.isNaN(timestampMs)) return null;
-
-      // Keep upstream timestamp as-is to avoid accidental timezone double-shifts.
-      const candleDate = new Date(timestampMs);
-
-      return {
-        date: this.formatDateTime(candleDate),
-        open: Number(open),
-        high: Number(high),
-        low: Number(low),
-        close: Number(close),
-        volume: Number(volume || 0),
-      };
-    } catch (error) {
-      console.error('Error normalizing candle:', error, raw);
-      return null;
-    }
-  }
-
-  async getLatestTimestamp(table, symbol) {
-    const result = await client.query({
-      query: `
-        SELECT max(date) AS latest
-        FROM ${table}
-        WHERE symbol = {symbol:String}
-      `,
-      query_params: {
-        symbol,
-      },
-      format: 'JSONEachRow',
-    });
-    const rows = await result.json();
-    return rows?.[0]?.latest ? new Date(rows[0].latest) : null;
-  }
-
-  async insertCandles(table, timeframe, symbol, sector, candles) {
-    if (!candles.length) return 0;
-    const rows = candles.map((c) => ({
-      date: c.date,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-      volume: c.volume,
-      symbol,
-      timeframe,
-      sector: sector || '',
-    }));
-
-    await client.insert({
-      table,
-      values: rows,
-      format: 'JSONEachRow',
-    });
-
-    return rows.length;
+    return [];
   }
 
   async syncTimeframe(timeframe) {
@@ -344,78 +92,129 @@ class UpstoxSyncService {
 
     try {
       const stocks = await this.getTrackedStocks();
-      if (stocks.length === 0) {
-        console.warn(`[UpstoxSync] No symbols found for ${timeframe} sync.`);
-        return;
-      }
+      if (!stocks.length) return;
 
-      console.log(`[UpstoxSync] Starting ${timeframe} sync for ${stocks.length} stocks`);
-      const { table } = this.getTimeframeConfig(timeframe);
-      let insertedTotal = 0;
-      let successCount = 0;
+      const table = timeframe === '15m' ? 'stocks_15min' : (timeframe === '1h' ? 'stocks_hourly' : 'stocks_daily');
+      const lookback = timeframe === '15m' ? 30 : (timeframe === '1h' ? 90 : 365);
 
       for (const stock of stocks) {
-        const symbol = stock.symbol;
         try {
-          const latest = await this.getLatestTimestamp(table, symbol);
-          console.log(`[UpstoxSync] ${symbol} ${timeframe}: Latest timestamp in DB: ${latest}`);
-
-          const upstreamCandles = await this.fetchCandles(symbol, timeframe);
-          console.log(`[UpstoxSync] ${symbol} ${timeframe}: Fetched ${upstreamCandles.length} candles from API`);
-
-          const normalized = upstreamCandles
-            .map((c) => this.normalizeCandle(c))
-            .filter(Boolean)
-            .sort((a, b) => new Date(a.date) - new Date(b.date));
-
-          console.log(`[UpstoxSync] ${symbol} ${timeframe}: ${normalized.length} normalized candles`);
-
-          // Remove duplicates by timestamp
-          const seen = new Set();
-          const deduplicated = normalized.filter(candle => {
-            const timestamp = Math.floor(new Date(candle.date).getTime() / 1000);
-            if (seen.has(timestamp)) {
-              return false;
+          // ROAST FIX: Persistent Caching. check memory -> check DB -> search Upstox
+          let instrumentKey = this.instrumentCache.get(stock.symbol) || stock.instrument_key;
+          
+          if (!instrumentKey) {
+            const segment = (stock.sector === 'INDEX' || stock.symbol.includes('NIFTY')) ? 'INDEX' : 'EQ';
+            const searchSymbol = stock.symbol === 'NIFTY' ? 'Nifty 50' : (stock.symbol === 'BANKNIFTY' ? 'Nifty Bank' : stock.symbol);
+            
+            const instruments = await upstoxApi.searchInstrument(searchSymbol, 'NSE', segment, 1);
+            if (!instruments.length || !instruments[0].instrument_key) {
+              console.warn(`[UpstoxSync] Could not resolve ${stock.symbol} on segment ${segment}. Skipping.`);
+              continue;
             }
-            seen.add(timestamp);
-            return true;
+            instrumentKey = instruments[0].instrument_key;
+            
+            // Persist found key to DB to avoid searching next time
+            this.instrumentCache.set(stock.symbol, instrumentKey);
+            await client.command({
+              query: `ALTER TABLE stocks_summary UPDATE instrument_key = {ik:String} WHERE symbol = {s:String}`,
+              query_params: { ik: instrumentKey, s: stock.symbol }
+            });
+            console.log(`[UpstoxSync] ⚡ Persisted new key for ${stock.symbol}: ${instrumentKey}`);
+          } else {
+            this.instrumentCache.set(stock.symbol, instrumentKey);
+          }
+
+          const rawCandles = await upstoxApi.fetchCandles(instrumentKey, timeframe, lookback);
+          if (!rawCandles.length) continue;
+
+          // ROAST FIX: Resample 1m data if needed
+          const processedCandles = this.resampleCandles(rawCandles, timeframe);
+          if (!processedCandles.length) continue;
+
+          // ... max(date) logic ...
+          const latestRes = await client.query({
+            query: `SELECT max(date) as latest FROM ${table} WHERE symbol = {s:String}`,
+            query_params: { s: stock.symbol },
+            format: 'JSONEachRow'
           });
+          const latest = (await latestRes.json())[0]?.latest;
+          const latestDate = latest ? new Date(latest) : null;
 
-          console.log(`[UpstoxSync] ${symbol} ${timeframe}: ${deduplicated.length} deduplicated candles`);
+          const rows = processedCandles.map(c => {
+            const n = upstoxApi.normalizeCandle(c);
+            return {
+              date: n.date, open: n.open, high: n.high, low: n.low, close: n.close, volume: n.volume,
+              symbol: stock.symbol, timeframe, sector: stock.sector || ''
+            };
+          }).filter(r => !latestDate || new Date(r.date) > latestDate);
 
-          // Debug date comparison
-          if (deduplicated.length > 0) {
-            console.log(`[UpstoxSync] ${symbol} ${timeframe}: First API candle date: ${deduplicated[0].date}`);
-            console.log(`[UpstoxSync] ${symbol} ${timeframe}: Last API candle date: ${deduplicated[deduplicated.length - 1].date}`);
-            console.log(`[UpstoxSync] ${symbol} ${timeframe}: Latest DB date: ${latest}`);
-            console.log(`[UpstoxSync] ${symbol} ${timeframe}: Comparison test - first candle > latest: ${new Date(deduplicated[0].date) > latest}`);
+          if (rows.length > 0) {
+            await client.insert({ table, values: rows, format: 'JSONEachRow' });
+            console.log(`[UpstoxSync] ${stock.symbol} ${timeframe}: +${rows.length} rows.`);
           }
-
-          const filtered = latest
-            ? deduplicated.filter((c) => new Date(c.date) > latest)
-            : deduplicated;
-
-          console.log(`[UpstoxSync] ${symbol} ${timeframe}: ${filtered.length} new candles to insert`);
-
-          const inserted = await this.insertCandles(table, timeframe, symbol, stock.sector, filtered);
-          insertedTotal += inserted;
-          if (inserted > 0) {
-            successCount++;
-          }
-          console.log(`[UpstoxSync] ${symbol} ${timeframe}: ${inserted} rows inserted`);
-        } catch (error) {
-          console.warn(`[UpstoxSync] Failed to sync ${symbol} ${timeframe}:`, error.message);
+        } catch (e) {
+          console.warn(`[UpstoxSync] Error syncing ${stock.symbol}:`, e.message);
         }
-
-        // Add small delay between stocks to avoid rate limits
-        await new Promise(resolve => setTimeout(resolve, 100)); // 100ms delay
+        await new Promise(r => setTimeout(r, 250)); // Increased Throttling (250ms) to respect Upstox Rate Limits
       }
-
-      console.log(`[UpstoxSync] ${timeframe} sync complete. ${successCount}/${stocks.length} stocks successful. Total inserted rows: ${insertedTotal}`);
-    } catch (error) {
-      console.error(`[UpstoxSync] ${timeframe} sync failed:`, error.message);
     } finally {
       this.isSyncing[timeframe] = false;
+    }
+  }
+
+  async syncFnoATM() {
+    if (process.env.UPSTOX_FNO_SYNC_ENABLED !== 'true') return;
+    const rawIndices = (process.env.UPSTOX_FNO_SEED_SYMBOLS || 'NIFTY,BANKNIFTY').split(',');
+    
+    // Official Upstox v2 search terms for indices
+    const indexMap = {
+      'NIFTY': 'Nifty 50',
+      'BANKNIFTY': 'Nifty Bank',
+      'FINNIFTY': 'Nifty Fin Service'
+    };
+
+    for (const rawIndex of rawIndices) {
+      try {
+        const indexSearch = indexMap[rawIndex.toUpperCase()] || rawIndex;
+        
+        // ROAST FIX: Indices MUST be searched in the INDEX segment
+        const instruments = await upstoxApi.searchInstrument(indexSearch, 'NSE', 'INDEX', 1);
+        if (!instruments.length || !instruments[0].instrument_key) {
+          console.warn(`[UpstoxSync] Could not resolve Index Key for ${rawIndex}. Skipping.`);
+          continue;
+        }
+
+        const instrumentKey = instruments[0].instrument_key;
+        const candles = await upstoxApi.fetchCandles(instrumentKey, '1h', 1);
+        if (!candles.length) continue;
+        const ltp = Number(candles[0][4]);
+
+        const res = await client.query({
+          query: `
+            SELECT instrument_key, trading_symbol, underlying_symbol, expiry, strike, option_type
+            FROM fno_contracts
+            WHERE underlying_symbol = {u:String} AND expiry >= today()
+            ORDER BY expiry ASC, abs(strike - {ltp:Float64}) ASC
+            LIMIT 10
+          `,
+          query_params: { u: index.toUpperCase(), ltp },
+          format: 'JSONEachRow'
+        });
+        const contracts = await res.json();
+        
+        if (contracts.length > 0) {
+          const nearestExpiry = contracts[0].expiry;
+          const atmContracts = contracts.filter(c => c.expiry === nearestExpiry).slice(0, 4);
+          
+          for (const contract of atmContracts) {
+             // ROAST FIX: Delegating specific contract sync to FnoService to avoid logic duplication
+             await fnoService.fetchAndStoreOhlcv(contract, '1h');
+             await fnoService.fetchAndStoreOhlcv(contract, '15m');
+          }
+        }
+      } catch (err) {
+        console.warn(`[UpstoxSync] FNO sync failed for ${index}:`, err.message);
+      }
     }
   }
 }
