@@ -153,6 +153,54 @@ class UpstoxApiService {
     }
   }
 
+  /**
+   * Upstox v3 market quote OHLC (live + previous candle) — used for LTP / ATM strike.
+   * GET /v3/market-quote/ohlc?instrument_key=...&interval=I30
+   */
+  async fetchMarketQuoteOhlc(instrumentKey, interval = 'I30') {
+    if (!process.env.UPSTOX_ACCESS_TOKEN && !this.accessToken) return null;
+    if (this.isRateLimitedNow()) return null;
+
+    const key = String(instrumentKey || '').trim();
+    if (!key) return null;
+
+    const safeInterval = String(interval || 'I30').trim() || 'I30';
+    const url = `${this.getV3BaseUrl()}/market-quote/ohlc?instrument_key=${encodeURIComponent(key)}&interval=${encodeURIComponent(safeInterval)}`;
+
+    try {
+      const response = await fetch(url, { headers: this.getHeaders() });
+      const bodyText = await response.text();
+      if (!response.ok) {
+        if (response.status === 429) {
+          const waitMs = this.extractRetryAfterMs(response, bodyText);
+          this.markRateLimited(waitMs);
+        }
+        console.warn(`[UpstoxAPI] market-quote/ohlc failed [${response.status}]: ${bodyText.slice(0, 200)}`);
+        return null;
+      }
+      const payload = JSON.parse(bodyText);
+      const rawData = payload?.data;
+      if (!rawData || typeof rawData !== 'object') return null;
+
+      const entries = Object.entries(rawData);
+      if (!entries.length) return null;
+
+      const [, row] = entries[0];
+      if (!row || typeof row !== 'object') return null;
+
+      return {
+        instrument_key: row.instrument_token || key,
+        last_price: Number(row.last_price),
+        prev_ohlc: row.prev_ohlc || null,
+        live_ohlc: row.live_ohlc || null,
+        raw: row,
+      };
+    } catch (e) {
+      console.error('[UpstoxAPI] market-quote/ohlc network error:', e.message);
+      return null;
+    }
+  }
+
   async fetchOptionChain(instrumentKey, expiry) {
     if (!process.env.UPSTOX_ACCESS_TOKEN && !this.accessToken) return [];
     if (this.isRateLimitedNow()) return [];

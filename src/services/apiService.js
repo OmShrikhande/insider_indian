@@ -155,6 +155,15 @@ class ApiService {
     );
   }
 
+  /** Upstox v3 market-quote/ohlc: persisted in ClickHouse, returns last_price + prev/live OHLC */
+  async getMarketQuoteOhlc(instrumentKey, interval = 'I30') {
+    const q = new URLSearchParams({
+      instrument_key: String(instrumentKey || '').trim(),
+      interval: String(interval || 'I30'),
+    });
+    return this.request(`/api/market/quote-ohlc?${q.toString()}`);
+  }
+
   getStockStreamUrl(symbol, timeframe = '1h', limit = 3000) {
     const params = new URLSearchParams({
       symbol,

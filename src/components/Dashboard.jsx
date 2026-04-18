@@ -17,6 +17,7 @@ import ScreenerPanel from './ScreenerPanel';
 import NewsList from './NewsList';
 import TradeFeed from './TradeFeed';
 import ResearchPanel from './ResearchPanel';
+import AlphaChatPanel from './AlphaChatPanel';
 
 import './Dashboard.css';
 
@@ -142,6 +143,7 @@ const Dashboard = () => {
         'n': () => setActiveRightPanel('news'),
         't': () => setActiveRightPanel('trades'),
         'r': () => setActiveRightPanel('research'),
+        'a': () => setActiveRightPanel('alpha'),
         'o': () => setShowOptionChain(p => !p),
       };
 
@@ -227,9 +229,9 @@ const Dashboard = () => {
           onToggleOptionChain={() => setShowOptionChain(p => !p)}
         />
 
-        <div className="flex-1 min-height-0 relative bg-black">
+        <div className="flex-1 min-height-0 relative bg-black z-0">
           {showOptionChain && fnoLogic.fnoExpiry ? (
-            <div className="absolute inset-0 z-20 bg-black/90 backdrop-blur-md p-6 overflow-hidden flex flex-col">
+            <div className="absolute inset-0 z-[200] bg-[#050505] p-6 overflow-hidden flex flex-col border border-[#1c2127] shadow-2xl">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-[#00f2ff] font-bold text-xs tracking-widest uppercase">
                   Option_Chain: {selectedSymbol} @ {fnoLogic.fnoExpiry}
@@ -266,6 +268,7 @@ const Dashboard = () => {
             </div>
           ) : null}
 
+          <div className={`absolute inset-0 z-0 min-h-0 ${showOptionChain && fnoLogic.fnoExpiry ? 'pointer-events-none opacity-0' : ''}`} aria-hidden={showOptionChain && fnoLogic.fnoExpiry ? true : undefined}>
           <MainChartArea 
             loading={loading}
             error={error}
@@ -282,6 +285,7 @@ const Dashboard = () => {
             fnoSpotData={fnoIndexSpotData}
             fnoSpotLoading={fnoIndexSpotLoading}
           />
+          </div>
         </div>
 
         {/* Status Bar */}
@@ -302,9 +306,9 @@ const Dashboard = () => {
       <div className={`${isRightSidebarCollapsed ? 'w-12' : 'w-72'} flex-shrink-0 flex flex-col bg-black border-l border-[#1c2127] transition-all duration-200 z-[100]`}>
         <div className="flex border-b border-[#1c2127] flex-shrink-0 bg-[#050505]">
           <button onClick={() => setIsRightSidebarCollapsed(p => !p)} className="px-2 w-12 text-[#848e9c] hover:text-[#00f2ff] transition-colors text-lg italic font-serif">i</button>
-          {!isRightSidebarCollapsed && ['news', 'trades', 'research'].map(panel => (
-            <button key={panel} onClick={() => setActiveRightPanel(panel)} className={`flex-1 py-4 text-[8px] font-black uppercase tracking-[0.2em] transition-all ${activeRightPanel === panel ? 'text-[#00f2ff] border-b-2 border-[#00f2ff] bg-[#00f2ff]/5' : 'text-[#5d606b] border-b-2 border-transparent hover:text-[#848e9c]'}`}>
-              {panel === 'news' ? 'Intel' : panel === 'trades' ? 'SMC' : 'Alpha'}
+          {!isRightSidebarCollapsed && ['news', 'trades', 'research', 'alpha'].map(panel => (
+            <button key={panel} onClick={() => setActiveRightPanel(panel)} className={`flex-1 py-3 text-[7px] font-black uppercase tracking-[0.15em] transition-all ${activeRightPanel === panel ? 'text-[#00f2ff] border-b-2 border-[#00f2ff] bg-[#00f2ff]/5' : 'text-[#5d606b] border-b-2 border-transparent hover:text-[#848e9c]'}`}>
+              {panel === 'news' ? 'Intel' : panel === 'trades' ? 'SMC' : panel === 'research' ? 'Data' : 'Alpha'}
             </button>
           ))}
         </div>
@@ -313,6 +317,13 @@ const Dashboard = () => {
             {activeRightPanel === 'news' && <NewsList selectedSymbol={selectedSymbol} />}
             {activeRightPanel === 'trades' && <TradeFeed trades={allTrades} />}
             {activeRightPanel === 'research' && <ResearchPanel selectedSymbol={selectedSymbol} />}
+            {activeRightPanel === 'alpha' && (
+              <AlphaChatPanel
+                selectedSymbol={selectedSymbol}
+                isFnoMode={fnoLogic.isFnoMode}
+                fnoExpiry={fnoLogic.fnoExpiry}
+              />
+            )}
           </div>
         )}
       </div>

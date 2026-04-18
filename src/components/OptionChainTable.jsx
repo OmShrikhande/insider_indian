@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import apiService from '../services/apiService';
 
 function normalizeChainRows(rows) {
@@ -38,13 +38,18 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract, spo
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [liveLastPrice, setLiveLastPrice] = useState(null);
+  const atmRowRef = useRef(null);
 
   const resolvedSpot = useMemo(() => {
+    const live =
+      liveLastPrice != null && !Number.isNaN(Number(liveLastPrice)) ? Number(liveLastPrice) : null;
+    if (live != null) return live;
     const s = spotPrice != null && !Number.isNaN(Number(spotPrice)) ? Number(spotPrice) : null;
     if (s != null) return s;
     const fromRow = data[0]?.underlying_spot_price;
     return fromRow != null && !Number.isNaN(Number(fromRow)) ? Number(fromRow) : null;
-  }, [spotPrice, data]);
+  }, [liveLastPrice, spotPrice, data]);
 
   const atmStrike = useMemo(() => {
     if (resolvedSpot == null || !data.length) return null;
@@ -60,6 +65,45 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract, spo
     return Number(best);
   }, [data, resolvedSpot]);
 
+  const resolvedKeyForQuote = useMemo(
+    () => instrumentKey || apiService.resolveFnoInstrumentKey(symbol),
+    [instrumentKey, symbol]
+  );
+
+  useEffect(() => {
+    setLiveLastPrice(null);
+  }, [resolvedKeyForQuote]);
+
+  useEffect(() => {
+    if (!symbol || !expiry || !resolvedKeyForQuote) return undefined;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await apiService.getMarketQuoteOhlc(resolvedKeyForQuote, 'I30');
+        const lp = res?.data?.last_price;
+        if (!cancelled && lp != null && !Number.isNaN(Number(lp))) {
+          setLiveLastPrice(Number(lp));
+        }
+      } catch {
+        /* keep chain spot / props */
+      }
+    };
+    poll();
+    const id = setInterval(poll, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [symbol, expiry, resolvedKeyForQuote]);
+
+  useEffect(() => {
+    if (atmStrike == null || !data.length) return;
+    const t = setTimeout(() => {
+      atmRowRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [atmStrike, data.length, liveLastPrice]);
+
   useEffect(() => {
     const fetchChain = async () => {
       if (!symbol || !expiry) return;
@@ -67,7 +111,7 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract, spo
         setLoading(true);
         setError(null);
 
-        const resolvedKey = instrumentKey || apiService.resolveFnoInstrumentKey(symbol);
+        const resolvedKey = resolvedKeyForQuote;
         let response = await apiService.getOptionChainByInstrument(resolvedKey, expiry);
         let rows = Array.isArray(response?.data) ? response.data : [];
 
@@ -95,7 +139,7 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract, spo
       }
     };
     fetchChain();
-  }, [symbol, instrumentKey, expiry]);
+  }, [symbol, instrumentKey, expiry, resolvedKeyForQuote]);
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center p-20 space-y-4">
@@ -125,6 +169,9 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract, spo
               <>
                 <span className="text-[#5d606b] mr-2">SPOT</span>
                 <span className="text-[#39ff14] font-bold">{fmt(resolvedSpot, 2)}</span>
+                {liveLastPrice != null && (
+                  <span className="text-[#5d606b] ml-2">(LIVE_LTP)</span>
+                )}
                 {atmStrike != null && (
                   <span className="text-[#5d606b] ml-3">ATM_STRIKE</span>
                 )}
@@ -176,8 +223,9 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract, spo
             return (
             <tr
               key={idx}
+              ref={isAtm ? atmRowRef : undefined}
               className={`border-b border-[#1c2127]/30 hover:bg-white/5 transition-colors group ${
-                isAtm ? 'bg-[#00f2ff]/10 ring-1 ring-inset ring-[#00f2ff]/35' : ''
+                isAtm ? 'bg-[#00f2ff]/15 ring-2 ring-inset ring-[#39ff14]/50 shadow-[0_0_12px_rgba(57,255,20,0.12)]' : ''
               }`}
             >
               {/* CALLS */}

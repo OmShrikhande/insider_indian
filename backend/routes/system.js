@@ -16,6 +16,10 @@ router.get('/sources', (req, res) => {
         instruments: 'Upstox Instruments Search API (NSE_FO) -> synced into fno_contracts',
         tables: ['fno_contracts'],
       },
+      marketQuote: {
+        liveOhlc: 'Upstox v3 GET /market-quote/ohlc -> persisted in market_quote_ohlc, served via GET /api/market/quote-ohlc',
+        tables: ['market_quote_ohlc'],
+      },
     },
   });
 });

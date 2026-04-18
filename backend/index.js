@@ -17,6 +17,7 @@ const strategyRoutes = require('./routes/strategies');
 const alertRoutes = require('./routes/alerts');
 const systemRoutes = require('./routes/system');
 const liveRoutes = require('./routes/live');
+const marketRoutes = require('./routes/market');
 
 const app = express();
 
@@ -62,6 +63,7 @@ app.use('/api/strategies', strategyRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/system', systemRoutes);
 app.use('/api/live', liveRoutes);
+app.use('/api/market', marketRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -180,7 +182,26 @@ async function setupDatabase() {
         put_options_json String DEFAULT '',
         rate_type String DEFAULT 'REAL',
         updated_at DateTime
-      ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (underlying_symbol, expiry, strike_price)`
+      ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (underlying_symbol, expiry, strike_price)`,
+      `CREATE TABLE IF NOT EXISTS market_quote_ohlc (
+        instrument_key String,
+        interval String,
+        last_price Float64,
+        prev_open Float64,
+        prev_high Float64,
+        prev_low Float64,
+        prev_close Float64,
+        prev_volume UInt64,
+        prev_ts UInt64,
+        live_open Float64,
+        live_high Float64,
+        live_low Float64,
+        live_close Float64,
+        live_volume UInt64,
+        live_ts UInt64,
+        raw_json String,
+        ingested_at DateTime
+      ) ENGINE = ReplacingMergeTree(ingested_at) ORDER BY (instrument_key, interval)`
     ];
 
     for (const query of createQueries) {
