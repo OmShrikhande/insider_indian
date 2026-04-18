@@ -18,6 +18,7 @@ import NewsList from './NewsList';
 import TradeFeed from './TradeFeed';
 import ResearchPanel from './ResearchPanel';
 import AlphaChatPanel from './AlphaChatPanel';
+import ResearchAnalystPanel from './ResearchAnalystPanel';
 
 import './Dashboard.css';
 
@@ -27,33 +28,80 @@ const buildDefaultIndicators = () =>
 import OptionChainTable from './OptionChainTable';
 import IndexOhlcChartModal from './IndexOhlcChartModal';
 
+const FNO_ALLOWED = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
+
 /**
  * Dashboard - Core platform layout.
  * ROAST FIX: Transformed from an 800-line "God Component" into a clean layout orchestrator.
  */
 const Dashboard = () => {
+  const readStored = (key, fallback) => {
+    try {
+      const value = localStorage.getItem(key);
+      if (value == null) return fallback;
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  };
   // --- Core State ---
-  const [selectedTimeframe, setSelectedTimeframe] = useState('1h');
-  const [selectedSymbol, setSelectedSymbol] = useState('ABB');
-  const [activeRightPanel, setActiveRightPanel] = useState('news');
+  const [selectedTimeframe, setSelectedTimeframe] = useState(() => readStored('roxey_selected_timeframe', '1h'));
+  const [selectedSymbol, setSelectedSymbol] = useState(() => readStored('roxey_selected_symbol', 'ABB'));
+  const [activeRightPanel, setActiveRightPanel] = useState(() => readStored('roxey_active_panel', 'news'));
   const [activeIndicators, setActiveIndicators] = useState(buildDefaultIndicators);
   const [activePatterns, setActivePatterns] = useState({ ...DEFAULT_PATTERNS });
   const [showGrid, setShowGrid] = useState(false);
+  const [candleStyle, setCandleStyle] = useState('default');
   const [isLeftSidebarCollapsed, setIsLeftSidebarCollapsed] = useState(false);
   const [isRightSidebarCollapsed, setIsRightSidebarCollapsed] = useState(false);
   const [currentUser, setCurrentUser] = useState(authService.getCurrentUser());
   const [showScreener, setShowScreener] = useState(false);
   const [showOptionChain, setShowOptionChain] = useState(false);
+  const [showSuggestScreen, setShowSuggestScreen] = useState(false);
   const [showIndexChart, setShowIndexChart] = useState(false);
   const [smcData, setSmcData] = useState({ suggestions: [] });
   const [chainRows, setChainRows] = useState([]);
   const [fnoIndexSpotData, setFnoIndexSpotData] = useState([]);
   const [fnoIndexSpotLoading, setFnoIndexSpotLoading] = useState(false);
+  const [fnoModeHydrated, setFnoModeHydrated] = useState(false);
+  const [focusedTrade, setFocusedTrade] = useState(null);
 
   // --- Specialized Hooks ---
-  const { data, news, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
+  const { data, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
   const fnoLogic = useFnoLogic(selectedSymbol, data);
   const fnoData = useFnoData(selectedSymbol, fnoLogic.fnoExpiry, fnoLogic.fnoStrike, selectedTimeframe);
+  const setFnoMode = fnoLogic.setIsFnoMode;
+  useEffect(() => {
+    localStorage.setItem('roxey_selected_symbol', JSON.stringify(selectedSymbol));
+  }, [selectedSymbol]);
+
+  useEffect(() => {
+    localStorage.setItem('roxey_selected_timeframe', JSON.stringify(selectedTimeframe));
+  }, [selectedTimeframe]);
+
+  useEffect(() => {
+    localStorage.setItem('roxey_active_panel', JSON.stringify(activeRightPanel));
+  }, [activeRightPanel]);
+
+  useEffect(() => {
+    localStorage.setItem('roxey_fno_mode', JSON.stringify(fnoLogic.isFnoMode));
+  }, [fnoLogic.isFnoMode]);
+
+  useEffect(() => {
+    const savedFnoMode = readStored('roxey_fno_mode', false);
+    if (!savedFnoMode) return;
+    setFnoMode(true);
+    setSelectedSymbol((prev) =>
+      FNO_ALLOWED.includes(String(prev || '').toUpperCase()) ? prev : 'NIFTY'
+    );
+    setFnoModeHydrated(true);
+  }, [setFnoMode]);
+
+  useEffect(() => {
+    if (fnoModeHydrated) return;
+    setFnoModeHydrated(true);
+  }, [fnoModeHydrated]);
+
 
   // --- Effects ---
   useEffect(() => {
@@ -79,15 +127,21 @@ const Dashboard = () => {
         const response = await apiService.getOptionChainByInstrument(resolvedKey, fnoLogic.fnoExpiry);
         const rows = Array.isArray(response?.data) ? response.data : [];
         setChainRows(rows);
-      } catch (err) {
+      } catch {
         setChainRows([]);
       }
     };
     loadChainRows();
   }, [fnoLogic.isFnoMode, fnoLogic.fnoExpiry, selectedSymbol]);
 
-  const chainTrades = detectChainSMC(chainRows, selectedSymbol, fnoLogic.fnoExpiry);
-  const allTrades = [...chainTrades, ...(smcData.suggestions || [])];
+  const chainTrades = useMemo(
+    () => detectChainSMC(chainRows, selectedSymbol, fnoLogic.fnoExpiry),
+    [chainRows, selectedSymbol, fnoLogic.fnoExpiry]
+  );
+  const allTrades = useMemo(
+    () => [...chainTrades, ...(smcData.suggestions || [])],
+    [chainTrades, smcData.suggestions]
+  );
 
   const indexUnderlyingForChart = useMemo(() => {
     const s = String(selectedSymbol || '').trim();
@@ -158,12 +212,21 @@ const Dashboard = () => {
       setSelectedSymbol(e.detail.symbol);
       setIsRightSidebarCollapsed(false);
     };
+    const handleFocusTrade = (e) => {
+      const trade = e?.detail || null;
+      if (!trade) return;
+      const symbolFromTrade = String(trade.symbol || '').trim().split(' ')[0];
+      if (symbolFromTrade) setSelectedSymbol(symbolFromTrade);
+      setFocusedTrade({ ...trade, _focusAt: Date.now() });
+    };
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('roxey-info-click', handleInfoClick);
+    window.addEventListener('roxey-focus-trade', handleFocusTrade);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('roxey-info-click', handleInfoClick);
+      window.removeEventListener('roxey-focus-trade', handleFocusTrade);
     };
   }, []);
 
@@ -175,7 +238,6 @@ const Dashboard = () => {
   };
 
   const activeIndicatorCount = Object.values(activeIndicators).filter(Boolean).length;
-  const activePatternCount  = Object.values(activePatterns).filter(Boolean).length;
 
   return (
     <div className="flex h-screen overflow-hidden elite-dashboard font-mono-elite bg-black">
@@ -193,7 +255,12 @@ const Dashboard = () => {
         onSymbolChange={setSelectedSymbol}
         isCollapsed={isLeftSidebarCollapsed}
         onToggleCollapse={() => setIsLeftSidebarCollapsed(p => !p)}
-        onFnoModeChange={(enabled) => fnoLogic.setIsFnoMode(enabled)}
+        onFnoModeChange={(enabled) => {
+          fnoLogic.setIsFnoMode(enabled);
+          if (enabled && !FNO_ALLOWED.includes(String(selectedSymbol || '').toUpperCase())) {
+            setSelectedSymbol('NIFTY');
+          }
+        }}
         onFnoExpirySelect={(expiry) => {
           if (expiry) {
             fnoLogic.setFnoStrike('');
@@ -223,6 +290,10 @@ const Dashboard = () => {
           onPatternToggle={(id, val) => setActivePatterns(p => ({ ...p, [id]: val }))}
           showGrid={showGrid}
           onToggleGrid={() => setShowGrid(p => !p)}
+          candleStyle={candleStyle}
+          onCandleStyleChange={setCandleStyle}
+          showSuggestScreen={showSuggestScreen}
+          onToggleSuggestScreen={() => setShowSuggestScreen((p) => !p)}
           onLogout={handleLogout}
           currentUser={currentUser}
           showOptionChain={showOptionChain}
@@ -267,6 +338,25 @@ const Dashboard = () => {
               </div>
             </div>
           ) : null}
+          {showSuggestScreen ? (
+            <div className="absolute inset-0 z-[220] bg-[#050505] border border-[#1c2127] shadow-2xl flex flex-col">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-[#1c2127] bg-[#0a0a0a]">
+                <div className="text-[#00f2ff] text-xs font-black tracking-widest uppercase">
+                  Suggest_Trade_Screen
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSuggestScreen(false)}
+                  className="px-3 py-1 bg-[#ff4d4d]/10 text-[#ff4d4d] border border-[#ff4d4d]/20 rounded text-[10px] font-bold hover:bg-[#ff4d4d]/20"
+                >
+                  CLOSE_X
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <ResearchAnalystPanel />
+              </div>
+            </div>
+          ) : null}
 
           <div className={`absolute inset-0 z-0 min-h-0 ${showOptionChain && fnoLogic.fnoExpiry ? 'pointer-events-none opacity-0' : ''}`} aria-hidden={showOptionChain && fnoLogic.fnoExpiry ? true : undefined}>
           <MainChartArea 
@@ -279,11 +369,13 @@ const Dashboard = () => {
             activeIndicators={activeIndicators}
             activePatterns={activePatterns}
             showGrid={showGrid}
+            candleStyle={candleStyle}
             onInfoClick={(sym) => { setSelectedSymbol(sym); setIsRightSidebarCollapsed(false); }}
             fnoData={fnoData}
             fnoStrike={fnoLogic.fnoStrike}
             fnoSpotData={fnoIndexSpotData}
             fnoSpotLoading={fnoIndexSpotLoading}
+            focusedTrade={focusedTrade}
           />
           </div>
         </div>

@@ -587,6 +587,135 @@ class FnoService {
     }
   }
 
+  makeTradeId() {
+    return `TRD_${Date.now()}_${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+  }
+
+  normalizeTradePayload(payload = {}) {
+    const marketSegment = String(payload.marketSegment || payload.market_segment || 'STOCK').toUpperCase();
+    const instrumentType = String(payload.instrumentType || payload.instrument_type || (marketSegment === 'FNO' ? 'OPTION' : 'EQUITY')).toUpperCase();
+    const optionType = String(payload.optionType || payload.option_type || '').toUpperCase();
+    const symbol = this.normalizeQuery(payload.symbol || '');
+    const side = String(payload.side || payload.type || 'BUY').toUpperCase();
+    const strikeNum = payload.strike != null && payload.strike !== '' ? Number(payload.strike) : null;
+    const expiry = payload.expiry ? String(payload.expiry) : null;
+    const entry = Number(payload.entry || 0);
+    const budget = Number(payload.budget || 0);
+    const target = Number(payload.target || 0);
+    const stopLoss = Number(payload.stopLoss ?? payload.stop_loss ?? 0);
+    const analysis = String(payload.analysis || '').trim();
+
+    if (!symbol) throw new Error('symbol is required');
+    if (!['BUY', 'SELL', 'LONG', 'SHORT'].includes(side)) throw new Error('side must be BUY/SELL/LONG/SHORT');
+    if (!(entry > 0 && target > 0 && stopLoss > 0)) throw new Error('entry, target and stopLoss must be > 0');
+    if (marketSegment === 'FNO' && instrumentType === 'OPTION') {
+      if (!['CE', 'PE'].includes(optionType)) throw new Error('optionType must be CE or PE for F&O options');
+      if (!(strikeNum > 0)) throw new Error('strike is required for F&O option');
+      if (!expiry) throw new Error('expiry is required for F&O option');
+    }
+
+    return {
+      id: this.makeTradeId(),
+      market_segment: marketSegment,
+      instrument_type: instrumentType,
+      option_type: optionType,
+      symbol,
+      side,
+      strike: strikeNum,
+      expiry: expiry || null,
+      entry,
+      budget: Number.isFinite(budget) && budget > 0 ? budget : 0,
+      target,
+      stop_loss: stopLoss,
+      analysis,
+      status: 'open',
+      handled_by: '',
+      handled_action: '',
+      handled_at: null,
+      source: String(payload.source || 'research_panel'),
+      created_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    };
+  }
+
+  async createSuggestedTrade(payload = {}) {
+    try {
+      const row = this.normalizeTradePayload(payload);
+      await client.insert({
+        table: 'trade_suggestions',
+        values: [row],
+        format: 'JSONEachRow',
+      });
+      return { success: true, data: this.sanitizeForJson(row) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  async getSuggestedTrades(limit = 100) {
+    try {
+      const safeLimit = Math.max(1, Math.min(500, Number(limit) || 100));
+      const result = await client.query({
+        query: `
+          SELECT
+            id, market_segment, instrument_type, option_type, symbol, side, strike, expiry,
+            entry, budget, target, stop_loss, analysis, status, handled_by, handled_action, handled_at, source, created_at
+          FROM trade_suggestions
+          ORDER BY created_at DESC
+          LIMIT {limit:UInt32}
+        `,
+        query_params: { limit: safeLimit },
+        format: 'JSONEachRow',
+      });
+      const rows = await result.json();
+      return { success: true, data: this.sanitizeForJson(rows) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  async handleSuggestedTrade(id, action = 'accept', handledBy = '') {
+    try {
+      const tradeId = String(id || '').trim();
+      const safeAction = String(action || '').toLowerCase();
+      if (!tradeId) return { success: false, error: 'trade id is required' };
+      if (!['accept', 'reject'].includes(safeAction)) return { success: false, error: 'action must be accept or reject' };
+
+      const fetch = await client.query({
+        query: `
+          SELECT
+            id, market_segment, instrument_type, option_type, symbol, side, strike, expiry,
+            entry, budget, target, stop_loss, analysis, source
+          FROM trade_suggestions
+          WHERE id = {id:String}
+          ORDER BY created_at DESC
+          LIMIT 1
+        `,
+        query_params: { id: tradeId },
+        format: 'JSONEachRow',
+      });
+      const rows = await fetch.json();
+      if (!rows.length) return { success: false, error: 'trade not found' };
+      const old = rows[0];
+      const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      const upsert = {
+        ...old,
+        status: 'handled',
+        handled_by: String(handledBy || 'system'),
+        handled_action: safeAction,
+        handled_at: now,
+        created_at: now,
+      };
+      await client.insert({
+        table: 'trade_suggestions',
+        values: [upsert],
+        format: 'JSONEachRow',
+      });
+      return { success: true, data: this.sanitizeForJson(upsert) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
   async syncAndGetOptionChainRaw(instrumentKey, expiryDate) {
     const sync = await this.syncOptionChain(instrumentKey, expiryDate);
     if (!sync.success) return sync;

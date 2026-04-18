@@ -1,4 +1,4 @@
-import { useState, useEffect, memo, useMemo } from 'react';
+import { useState, useEffect, memo, useMemo, useRef } from 'react';
 import apiService from '../services/apiService';
 
 const SidebarItem = memo(({ s, selectedSymbol, onSymbolChange, inWatchlist, onToggleWatchlist, compact }) => {
@@ -55,9 +55,14 @@ const Sidebar = ({
   const [chainPreview, setChainPreview] = useState([]);
   const [fnoMetaLoading, setFnoMetaLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const searchDebounceRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState('all'); // all | watchlist | fno
   const [watchlist, setWatchlist] = useState([]);
+
+  useEffect(() => () => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+  }, []);
 
   useEffect(() => {
     const fetchWatchlist = async () => {
@@ -76,7 +81,7 @@ const Sidebar = ({
   useEffect(() => {
     const fetchFno = async () => {
       try {
-        const response = await apiService.getFnoContracts('', 400);
+        const response = await apiService.getFnoContracts('', 120);
         if (response?.success && Array.isArray(response.data)) {
           const optionContracts = response.data.filter((item) => {
             const type = String(item.option_type || item.instrument_type || '').toUpperCase();
@@ -104,10 +109,9 @@ const Sidebar = ({
             in_daily: 1,
           })));
 
-          if (!selectedFnoExpiry && uniq.length > 0) {
+          if (uniq.length > 0) {
             const firstExpiry = mapWithArrays[uniq[0]]?.[0] || '';
-            setSelectedFnoExpiry(firstExpiry);
-            if (firstExpiry) onFnoExpirySelect?.(firstExpiry);
+            if (firstExpiry) setSelectedFnoExpiry((prev) => prev || firstExpiry);
           }
         }
       } catch (err) {
@@ -117,7 +121,12 @@ const Sidebar = ({
       }
     };
     fetchFno();
-  }, [onFnoExpirySelect, selectedFnoExpiry]);
+  }, [onFnoExpirySelect]);
+
+  useEffect(() => {
+    if (!selectedFnoExpiry) return;
+    onFnoExpirySelect?.(selectedFnoExpiry);
+  }, [selectedFnoExpiry, onFnoExpirySelect]);
 
   useEffect(() => {
     const loadChainPreview = async () => {
@@ -164,31 +173,38 @@ const Sidebar = ({
     fetchTopSymbols();
   }, []);
 
-  const handleSearch = async (query) => {
+  const handleSearch = (query) => {
     setSearch(query);
-    if (viewMode === 'fno') {
-      const response = await apiService.getFnoContracts(query || '', 50);
-      if (response?.success && Array.isArray(response.data)) {
-        const optionsOnly = response.data.filter((item) => {
-          const type = String(item.option_type || item.instrument_type || '').toUpperCase();
-          return type === 'CE' || type === 'PE';
-        });
-        const uniq = Array.from(
-          new Set(optionsOnly.map((item) => (item.underlying_symbol || '').toUpperCase()).filter(Boolean))
-        );
-        setFnoSymbols(uniq.map((symbol) => ({
-          symbol,
-          in_hourly: 1,
-          in_daily: 1,
-        })));
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        if (viewMode === 'fno') {
+          const response = await apiService.getFnoContracts(query || '', 50);
+          if (response?.success && Array.isArray(response.data)) {
+            const optionsOnly = response.data.filter((item) => {
+              const type = String(item.option_type || item.instrument_type || '').toUpperCase();
+              return type === 'CE' || type === 'PE';
+            });
+            const uniq = Array.from(
+              new Set(optionsOnly.map((item) => (item.underlying_symbol || '').toUpperCase()).filter(Boolean))
+            );
+            setFnoSymbols(uniq.map((symbol) => ({
+              symbol,
+              in_hourly: 1,
+              in_daily: 1,
+            })));
+          }
+        } else {
+          const response = await apiService.searchSymbols(query || '');
+          if (response) {
+            const data = Array.isArray(response) ? response : (response.data || []);
+            setSymbols(data);
+          }
+        }
+      } catch (err) {
+        console.error('Sidebar search failed:', err);
       }
-    } else {
-      const response = await apiService.searchSymbols(query || '');
-      if (response) {
-        const data = Array.isArray(response) ? response : (response.data || []);
-        setSymbols(data);
-      }
-    }
+    }, 300);
   };
 
   const symbolMap = useMemo(() => new Map(symbols.map((item) => [item.symbol, item])), [symbols]);
@@ -274,7 +290,6 @@ const Sidebar = ({
                   const defaultExpiry = fnoExpiriesMap[selectedSymbol]?.[0] || selectedFnoExpiry;
                   if (defaultExpiry) {
                     setSelectedFnoExpiry(defaultExpiry);
-                    onFnoExpirySelect?.(defaultExpiry);
                   }
                 }}
                 className={`flex-1 py-1 text-[8px] font-bold uppercase rounded border transition-all ${
@@ -305,7 +320,6 @@ const Sidebar = ({
                   value={selectedFnoExpiry}
                   onChange={(e) => {
                     setSelectedFnoExpiry(e.target.value);
-                    onFnoExpirySelect?.(e.target.value);
                   }}
                   className="flex-1 bg-[#000] border border-[#1c2127] text-[#00f2ff] text-[9px] rounded px-2 py-1 font-mono"
                 >
@@ -346,7 +360,6 @@ const Sidebar = ({
                   const nextExpiry = (fnoExpiriesMap[symbol] || [])[0];
                   if (nextExpiry) {
                     setSelectedFnoExpiry(nextExpiry);
-                    onFnoExpirySelect?.(nextExpiry);
                   }
                 }
               }}

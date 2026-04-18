@@ -1,11 +1,78 @@
-const TradeFeed = ({ trades = [] }) => {
-  if (trades.length === 0) return <div className="p-4 text-xs text-[#5d606b] font-mono">Scanning live vectors for SMC setups...</div>;
+import { useEffect, useMemo, useState } from 'react';
+import apiService from '../services/apiService';
 
+const TradeFeed = ({ trades = [] }) => {
+  const [dbTrades, setDbTrades] = useState([]);
+  const [toast, setToast] = useState('');
+
+  const notify = (msg) => {
+    setToast(msg);
+    window.setTimeout(() => setToast(''), 2200);
+  };
+
+  const loadDbTrades = async () => {
+    try {
+      const res = await apiService.getFnoSuggestedTrades(120);
+      if (res?.success && Array.isArray(res.data)) setDbTrades(res.data);
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    loadDbTrades();
+  }, []);
+
+  const localTrades = useMemo(() => trades.map((t, i) => ({
+    ...t,
+    id: `LOCAL_${i}`,
+    status: t.status || 'open',
+    handled_action: t.handled_action || '',
+    isDb: false,
+  })), [trades]);
+
+  const suggestedTrades = useMemo(() => dbTrades.map((t) => ({
+    id: t.id,
+    symbol: t.symbol,
+    type: ['SELL', 'SHORT'].includes(String(t.side || '').toUpperCase()) ? 'SHORT' : 'LONG',
+    entry: Number(t.entry || 0),
+    target: Number(t.target || 0),
+    stopLoss: Number(t.stop_loss || 0),
+    reason: t.analysis || '',
+    time: Math.floor(new Date(t.created_at || Date.now()).getTime() / 1000),
+    status: t.status || 'open',
+    handled_action: t.handled_action || '',
+    isDb: true,
+  })), [dbTrades]);
+
+  const mergedTrades = [...suggestedTrades, ...localTrades];
+  const visibleTrades = mergedTrades.slice(0, 10);
+  if (visibleTrades.length === 0) return <div className="p-4 text-xs text-[#5d606b] font-mono">Scanning live vectors for SMC setups...</div>;
+
+  const focusTradeOnChart = (trade) => {
+    window.dispatchEvent(new CustomEvent('roxey-focus-trade', { detail: trade }));
+  };
+
+  const handleAction = async (trade, action) => {
+    if (!trade.isDb) {
+      notify(`Trade ${action === 'accept' ? 'accepted' : 'rejected'} (local-only signal).`);
+      return;
+    }
+    try {
+      const res = await apiService.handleFnoSuggestedTrade(trade.id, action, 'trader');
+      if (res?.success) {
+        notify(`Trade ${action === 'accept' ? 'accepted' : 'rejected'} and marked handled.`);
+        loadDbTrades();
+      } else {
+        notify(res?.error || 'Action failed');
+      }
+    } catch (e) {
+      notify(e.message || 'Action failed');
+    }
+  };
 
   return (
-    <div className="flex flex-col h-full bg-[#000]">
+    <div className="flex flex-col h-full bg-[#000] relative">
       <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-        {trades.map((trade, idx) => (
+        {visibleTrades.map((trade, idx) => (
           <div key={idx} className="p-4 elite-panel elite-card relative group transition-all">
             <div className={`absolute top-0 right-0 w-1 h-full rounded-r ${
               trade.type === 'LONG' ? 'bg-[#39ff14]' : 'bg-[#ff003c]'
@@ -25,6 +92,11 @@ const TradeFeed = ({ trades = [] }) => {
                 {trade.time && (
                   <span className="text-[8px] text-[#848e9c] font-mono tracking-widest">
                     {new Date(trade.time * 1000).toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' })}
+                  </span>
+                )}
+                {String(trade.status).toLowerCase() === 'handled' && (
+                  <span className="text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-widest bg-[#ffea00]/10 text-[#ffea00] border border-[#ffea00]/30">
+                    Handled {trade.handled_action ? `(${trade.handled_action})` : ''}
                   </span>
                 )}
               </div>
@@ -68,6 +140,40 @@ const TradeFeed = ({ trades = [] }) => {
               <span className="text-[#00f2ff] mr-1">ANALYSIS:</span> "{trade.reason}"
             </div>
 
+            {String(trade.status).toLowerCase() !== 'handled' && (
+              <div className="flex gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => handleAction(trade, 'accept')}
+                  className="flex-1 py-2 rounded border border-[#39ff14]/40 bg-[#39ff14]/10 text-[#39ff14] text-[10px] font-black tracking-widest hover:bg-[#39ff14]/20"
+                >
+                  ACCEPT
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAction(trade, 'reject')}
+                  className="flex-1 py-2 rounded border border-[#ff4d4d]/30 bg-[#ff4d4d]/10 text-[#ff4d4d] text-[10px] font-black tracking-widest hover:bg-[#ff4d4d]/20"
+                >
+                  REJECT
+                </button>
+              </div>
+            )}
+
+            <div className="mb-3">
+              <button
+                type="button"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/json', JSON.stringify(trade));
+                  e.dataTransfer.effectAllowed = 'copyMove';
+                }}
+                onClick={() => focusTradeOnChart(trade)}
+                className="w-full py-2 rounded border border-[#00f2ff]/40 bg-[#00f2ff]/10 text-[#00f2ff] text-[10px] font-black tracking-widest hover:bg-[#00f2ff]/20"
+              >
+                SHOW_ON_CHART (DRAG_OR_CLICK)
+              </button>
+            </div>
+
             <div className="flex items-center gap-3">
               <div className="flex-1 h-1 bg-[#1c2127] rounded-full overflow-hidden">
                 <div 
@@ -86,6 +192,11 @@ const TradeFeed = ({ trades = [] }) => {
           + UNLOCK QUANTUM ALPHA
         </button>
       </div>
+      {toast && (
+        <div className="absolute bottom-3 left-3 right-3 text-center text-[10px] font-mono border border-[#00f2ff]/30 bg-[#00f2ff]/10 text-[#b4f4ff] px-2 py-1 rounded">
+          {toast}
+        </div>
+      )}
     </div>
   );
 };

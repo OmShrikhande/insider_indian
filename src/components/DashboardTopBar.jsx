@@ -27,6 +27,10 @@ const DashboardTopBar = ({
   onPatternToggle,
   showGrid,
   onToggleGrid,
+  candleStyle,
+  onCandleStyleChange,
+  showSuggestScreen,
+  onToggleSuggestScreen,
   onLogout,
   currentUser,
   showOptionChain,
@@ -44,6 +48,16 @@ const DashboardTopBar = ({
           
           <button onClick={onShowScreener} className="ml-2 px-2 py-0.5 bg-[#ffea00]/10 text-[#ffea00] border border-[#ffea00]/30 text-[9px] tracking-widest font-black rounded hover:bg-[#ffea00]/20 uppercase transition-all">
              SCREENER
+          </button>
+          <button
+            onClick={onToggleSuggestScreen}
+            className={`ml-2 px-2 py-0.5 text-[9px] tracking-widest font-black rounded uppercase border transition-all ${
+              showSuggestScreen
+                ? 'bg-[#00f2ff] text-black border-[#00f2ff]'
+                : 'bg-transparent text-[#00f2ff] border-[#00f2ff]/30 hover:bg-[#00f2ff]/10'
+            }`}
+          >
+            SUGGEST
           </button>
 
           <button onClick={onToggleFnoMode} className={`ml-2 px-2 py-0.5 text-[9px] tracking-widest font-black rounded uppercase border transition-all ${isFnoMode ? 'bg-[#39ff14]/10 text-[#39ff14] border-[#39ff14]/30 shadow-[0_0_8px_#39ff1433]' : 'bg-transparent text-[#848e9c] border-[#1c2127] hover:border-[#848e9c]'}`}>
@@ -91,6 +105,16 @@ const DashboardTopBar = ({
 
       {/* Indicator, Pattern & Grid toggle buttons */}
       <div className="flex items-center gap-2">
+        <select
+          value={candleStyle}
+          onChange={(e) => onCandleStyleChange?.(e.target.value)}
+          className="h-8 bg-black border border-[#1c2127] hover:border-[#00f2ff] text-[#00f2ff] text-[10px] uppercase font-mono px-2 rounded outline-none transition-colors"
+          title="Candle style"
+        >
+          <option value="default">Default</option>
+          <option value="hollow">Hollow</option>
+          <option value="mono">Mono</option>
+        </select>
         <IndicatorPanel activeIndicators={activeIndicators} onToggle={onIndicatorToggle} />
         <PatternPanel activePatterns={activePatterns} onToggle={onPatternToggle} />
         <div className="w-px h-6 bg-[#1c2127] mx-1" />

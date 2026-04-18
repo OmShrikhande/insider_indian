@@ -8,8 +8,8 @@ class ScreenerService {
     this.cacheExpiryMinutes = 10; // Cache data for 10 minutes
     this.syncInterval = null;
     this.isSyncing = false;
-    this.batchSize = 50; // Process 50 stocks at a time
-    this.batchDelay = 20000; // 20 seconds between batches
+    this.batchSize = 25; // Lower pressure per batch
+    this.batchDelay = 5000; // Faster incremental refresh
     this.initBackgroundSync();
   }
 
@@ -187,7 +187,7 @@ class ScreenerService {
         query_params: {
           screenerType,
           cacheExpiryMinutes: this.cacheExpiryMinutes,
-          limit: Math.min(100, Math.max(5, Number(limit) || 20))
+          limit: Math.min(5000, Math.max(5, Number(limit) || 20))
         },
         format: 'JSONEachRow',
       });
@@ -220,7 +220,7 @@ class ScreenerService {
         `,
         query_params: {
           screenerType,
-          limit: Math.min(100, Math.max(5, Number(limit) || 20))
+          limit: Math.min(5000, Math.max(5, Number(limit) || 20))
         },
         format: 'JSONEachRow',
       });
@@ -360,8 +360,11 @@ class ScreenerService {
       return partialData;
     }
 
-    // Start fresh scan
-    return await this.scanMomentumBackground(limit);
+    // Start fresh scan in background and return immediately to avoid API timeout
+    this.scanMomentumBackground(limit).catch((error) => {
+      console.error('Background momentum scan failed:', error.message);
+    });
+    return [];
   }
 
   async scanMomentumBackground(limit = 20) {
@@ -397,8 +400,8 @@ class ScreenerService {
 
       console.log(`Batch completed: ${validResults.length}/${batch.length} valid results`);
 
-      // Sort and store intermediate results
-      if (results.length > 0) {
+      const shouldStoreIntermediate = i === 0 || (i + this.batchSize >= allSymbols.length);
+      if (results.length > 0 && shouldStoreIntermediate) {
         const intermediateResults = results
           .sort((a, b) => b.momentum_score - a.momentum_score)
           .slice(0, Math.max(limit, 100)); // Store more for better ranking
@@ -442,8 +445,11 @@ class ScreenerService {
       return partialData;
     }
 
-    // Start fresh scan
-    return await this.scanVolatilityBackground(limit);
+    // Start fresh scan in background and return immediately to avoid API timeout
+    this.scanVolatilityBackground(limit).catch((error) => {
+      console.error('Background volatility scan failed:', error.message);
+    });
+    return [];
   }
 
   async scanVolatilityBackground(limit = 20) {
@@ -481,8 +487,8 @@ class ScreenerService {
 
       console.log(`Batch completed: ${validResults.length}/${batch.length} valid results`);
 
-      // Sort and store intermediate results
-      if (results.length > 0) {
+      const shouldStoreIntermediate = i === 0 || (i + this.batchSize >= allSymbols.length);
+      if (results.length > 0 && shouldStoreIntermediate) {
         const intermediateResults = results
           .sort((a, b) => b.volatility_score - a.volatility_score)
           .slice(0, Math.max(limit, 100));
@@ -526,8 +532,11 @@ class ScreenerService {
       return partialData;
     }
 
-    // Start fresh scan
-    return await this.scanTrendBackground(limit);
+    // Start fresh scan in background and return immediately to avoid API timeout
+    this.scanTrendBackground(limit).catch((error) => {
+      console.error('Background trend scan failed:', error.message);
+    });
+    return [];
   }
 
   async scanTrendBackground(limit = 20) {
@@ -566,8 +575,8 @@ class ScreenerService {
 
       console.log(`Batch completed: ${validResults.length}/${batch.length} valid results`);
 
-      // Sort and store intermediate results
-      if (results.length > 0) {
+      const shouldStoreIntermediate = i === 0 || (i + this.batchSize >= allSymbols.length);
+      if (results.length > 0 && shouldStoreIntermediate) {
         const intermediateResults = results
           .sort((a, b) => Math.abs(b.changePercent) - Math.abs(a.changePercent))
           .slice(0, Math.max(limit, 100));

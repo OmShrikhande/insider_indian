@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   createChart,
   CrosshairMode,
@@ -12,7 +12,7 @@ import { scanPatterns } from '../lib/patterns';
 import { detectSMC } from '../lib/smc';
 import { calculateVolumeProfile } from '../lib/volumeProfile';
 
-const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, activePatterns, showGrid, onInfoClick }) => {
+const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, activePatterns, showGrid, candleStyle = 'default', onInfoClick, focusedTrade = null }) => {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const candleRef = useRef(null);
@@ -30,6 +30,59 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
   const [currentLine, setCurrentLine] = useState(null); // { start: { time, price }, end: { time, price } }
   const [currentBox, setCurrentBox] = useState(null); // { start: { time, price }, end: { time, price } }
   const [vpProfile, setVpProfile] = useState(null);
+  const [droppedTrade, setDroppedTrade] = useState(null);
+  const sanitizeSeries = useCallback((rows) => {
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+    const byTime = new Map();
+    for (const row of rows) {
+      const t = Number(row?.time);
+      if (!Number.isFinite(t)) continue;
+      byTime.set(t, {
+        ...row,
+        time: t,
+        open: Number(row.open),
+        high: Number(row.high),
+        low: Number(row.low),
+        close: Number(row.close),
+        volume: Number(row.volume || 0),
+      });
+    }
+    return Array.from(byTime.values()).sort((a, b) => a.time - b.time);
+  }, []);
+  const plotData = useMemo(() => sanitizeSeries(data), [data, sanitizeSeries]);
+  const activeFocusedTrade = droppedTrade || focusedTrade;
+  const focusedCandle = useMemo(() => {
+    if (!activeFocusedTrade || !plotData.length) return null;
+    const tradeTs = Number(activeFocusedTrade.time || 0);
+    let best = plotData[0];
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (const c of plotData) {
+      const d = Math.abs(Number(c.time) - tradeTs);
+      if (d < bestDelta) {
+        bestDelta = d;
+        best = c;
+      }
+    }
+    return best;
+  }, [activeFocusedTrade, plotData]);
+
+  useEffect(() => {
+    if (!focusedCandle || !chartRef.current) return;
+    const timeScale = chartRef.current.timeScale();
+    const candleIndex = plotData.findIndex(c => c.time === focusedCandle.time);
+    if (candleIndex === -1) return;
+
+    const barCount = 100;
+    const from = Math.max(0, candleIndex - Math.floor(barCount / 2));
+    const to = from + barCount;
+    
+    setTimeout(() => {
+      if (chartRef.current) {
+        chartRef.current.timeScale().setVisibleLogicalRange({ from, to });
+      }
+    }, 50);
+  }, [focusedCandle, plotData]);
+
   const getTimeCoordinate = useCallback((time) => {
     const timeScale = chartRef.current?.timeScale?.();
     if (!timeScale || typeof timeScale.timeToCoordinate !== 'function') return null;
@@ -131,6 +184,40 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
   }, [showGrid]);
 
   useEffect(() => {
+    const candle = candleRef.current;
+    if (!candle) return;
+    if (candleStyle === 'hollow') {
+      candle.applyOptions({
+        upColor: 'rgba(0,0,0,0)',
+        downColor: '#ff003c',
+        borderVisible: true,
+        borderUpColor: '#39ff14',
+        borderDownColor: '#ff003c',
+        wickUpColor: '#39ff14',
+        wickDownColor: '#ff003c',
+      });
+      return;
+    }
+    if (candleStyle === 'mono') {
+      candle.applyOptions({
+        upColor: '#00f2ff',
+        downColor: '#00f2ff',
+        borderVisible: false,
+        wickUpColor: '#00f2ff',
+        wickDownColor: '#00f2ff',
+      });
+      return;
+    }
+    candle.applyOptions({
+      upColor: '#39ff14',
+      downColor: '#ff003c',
+      borderVisible: false,
+      wickUpColor: '#39ff14',
+      wickDownColor: '#ff003c',
+    });
+  }, [candleStyle]);
+
+  useEffect(() => {
     if (!chartRef.current) return;
     const tf = timeframe || '1h';
     const spacing = tf === '15m' ? 14 : tf === '1h' ? 11 : 8;
@@ -147,9 +234,10 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
   useEffect(() => {
     const chart = chartRef.current;
     const candle = candleRef.current;
-    if (!chart || !candle || !data || data.length === 0) return;
+    const safeData = plotData;
+    if (!chart || !candle || safeData.length === 0) return;
 
-    candle.setData(data);
+    candle.setData(safeData);
 
     // Remove stale indicator series
     Object.values(seriesMapRef.current).forEach(s => {
@@ -326,10 +414,10 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
     // ── Pattern & News & SMC Markers (lightweight-charts v5 API) ──────────
     if (candleRef.current) {
       try {
-        const patternMarkers = activePatterns ? scanPatterns(data, activePatterns) : [];
+        const patternMarkers = activePatterns ? scanPatterns(safeData, activePatterns) : [];
         
         // SMC Detection
-        const smc = detectSMC(data);
+        const smc = detectSMC(safeData);
         const smcMarkers = [];
         const smcBoxes = []; // New: filled boxes for Order Blocks
 
@@ -344,10 +432,10 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
             const borderColor = ob.sentiment === 'bull' ? '#39ff14' : '#ff003c';
 
             smcBoxes.push({
-              id: `ob_${ob.time}`,
+              id: `ob_${ob.time}_${ob.sentiment}_${ob.high}_${ob.low}`,
               type: 'box',
               start: { time: ob.time, price: ob.low },
-              end: { time: ob.time + 10, price: ob.high }, // Extend box for visibility
+              end: { time: safeData[safeData.length - 1].time + 20, price: ob.high },
               color: boxColor,
               borderColor: borderColor,
               fill: true,
@@ -359,12 +447,12 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
           smc.suggestions.forEach((suggestion, idx) => {
             const rangeColor = suggestion.type === 'LONG' ? 'rgba(57, 255, 20, 0.1)' : 'rgba(255, 0, 60, 0.1)';
             const borderColor = suggestion.type === 'LONG' ? '#39ff14' : '#ff003c';
-            const latestTime = data[data.length - 1].time;
+            const latestTime = safeData[safeData.length - 1].time;
 
             smcBoxes.push({
               id: `trade_${idx}_${latestTime}`,
               type: 'box',
-              start: { time: latestTime - 50, price: suggestion.range.min }, // Show range for last 50 candles
+              start: { time: suggestion.time || latestTime - 50, price: suggestion.range.min },
               end: { time: latestTime + 20, price: suggestion.range.max },
               color: rangeColor,
               borderColor: borderColor,
@@ -395,16 +483,20 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
         // Add SMC boxes to drawings for range display
         if (smcBoxes.length > 0) {
           setDrawings(prev => {
-            // Remove old SMC boxes first
-            const filtered = prev.filter(d => !d.id?.startsWith('ob_'));
-            // Add new SMC boxes
+            const filtered = prev.filter(
+              d => !d.id?.startsWith('ob_') && !d.id?.startsWith('trade_')
+            );
             return [...filtered, ...smcBoxes];
           });
+        } else {
+          setDrawings(prev => prev.filter(
+            d => !d.id?.startsWith('ob_') && !d.id?.startsWith('trade_')
+          ));
         }
 
         // Volume Profile Overlay
         if (activeIndicators?.vp) {
-          const vp = calculateVolumeProfile(data);
+          const vp = calculateVolumeProfile(safeData);
           setVpProfile(vp);
         } else {
           setVpProfile(null);
@@ -417,7 +509,7 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
 
     const timeScale = chart.timeScale();
     const zoomToRecentBars = (barCount = 160) => {
-      const total = data.length;
+      const total = safeData.length;
       if (total < 2) return;
       const to = total - 1 + 4;
       const from = Math.max(0, to - barCount);
@@ -437,7 +529,7 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
       zoomToRecentBars(barCountByTf);
       prevSymbolRef.current = symbol;
     }
-  }, [data, news, activeIndicators, activePatterns, symbol, timeframe]);
+  }, [plotData, news, activeIndicators, activePatterns, symbol, timeframe]);
 
   const animateZoom = (direction) => {
     const ts = chartRef.current?.timeScale();
@@ -543,6 +635,22 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
       className="relative w-full h-full bg-[#000000]" 
       onClick={handleChartClick}
       onMouseMove={handleMouseMove}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        try {
+          const raw = e.dataTransfer.getData('application/json');
+          if (!raw) return;
+          const parsed = JSON.parse(raw);
+          setDroppedTrade(parsed);
+          window.dispatchEvent(new CustomEvent('roxey-focus-trade', { detail: parsed }));
+        } catch (error) {
+          console.warn('Trade drop parse failed:', error);
+        }
+      }}
     >
 
       {/* Toolbar */}
@@ -741,6 +849,93 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
               height={Math.abs(y1 - y2)}
               fill="rgba(0,242,255,0.1)" stroke="rgba(0,242,255,0.2)" strokeDasharray="4 4"
             />
+          );
+        })()}
+
+        {activeFocusedTrade && chartRef.current && (() => {
+          const x = focusedCandle ? getTimeCoordinate(focusedCandle.time) : null;
+          const yTop = focusedCandle ? getPriceCoordinate(focusedCandle.high) : null;
+          const yBottom = focusedCandle ? getPriceCoordinate(focusedCandle.low) : null;
+          
+          const isLong = String(activeFocusedTrade.type).toUpperCase() === 'LONG';
+          const tradeColor = isLong ? '#39ff14' : '#ff003c';
+          const tradeBg = isLong ? 'rgba(57,255,20,0.15)' : 'rgba(255,0,60,0.15)';
+
+          const rangeMin = Number(
+            activeFocusedTrade?.range?.min ??
+            activeFocusedTrade?.stopLoss ??
+            (focusedCandle ? Math.min(focusedCandle.open, focusedCandle.close) : 0)
+          );
+          const rangeMax = Number(
+            activeFocusedTrade?.range?.max ??
+            activeFocusedTrade?.target ??
+            (focusedCandle ? Math.max(focusedCandle.open, focusedCandle.close) : 0)
+          );
+          const yRangeTop = getPriceCoordinate(Math.max(rangeMax, rangeMin));
+          const yRangeBottom = getPriceCoordinate(Math.min(rangeMax, rangeMin));
+          const xStart = x != null ? x - 10 : 0;
+          const xEnd = x != null ? x + 350 : (containerRef.current?.clientWidth || 300);
+
+          const yEntry = activeFocusedTrade.entry ? getPriceCoordinate(activeFocusedTrade.entry) : null;
+          const yTarget = activeFocusedTrade.target ? getPriceCoordinate(activeFocusedTrade.target) : null;
+          const ySL = activeFocusedTrade.stopLoss ? getPriceCoordinate(activeFocusedTrade.stopLoss) : null;
+
+          return (
+            <>
+              {x != null && yTop != null && yBottom != null && (
+                <rect
+                  x={x - 7}
+                  y={Math.min(yTop, yBottom) - 3}
+                  width={14}
+                  height={Math.abs(yTop - yBottom) + 6}
+                  fill="none"
+                  stroke="#00f2ff"
+                  strokeWidth="2"
+                  strokeDasharray="2 2"
+                />
+              )}
+              {yRangeTop != null && yRangeBottom != null && (
+                <g>
+                  <rect
+                    x={x != null ? xStart : 0}
+                    y={Math.min(yRangeTop, yRangeBottom)}
+                    width={x != null ? Math.max(100, xEnd - xStart) : (containerRef.current?.clientWidth || 300)}
+                    height={Math.max(2, Math.abs(yRangeTop - yRangeBottom))}
+                    fill={tradeBg}
+                    stroke={tradeColor}
+                    strokeWidth="1.5"
+                    strokeOpacity="0.8"
+                  />
+                  {/* Labels */}
+                  {yTarget != null && (
+                    <text x={(x != null ? xStart : 0) + 10} y={yTarget - 5} fill={tradeColor} fontSize="9" fontWeight="bold" fontFamily="monospace">
+                      TARGET: {activeFocusedTrade.target.toFixed(2)}
+                    </text>
+                  )}
+                  {yEntry != null && (
+                    <text x={(x != null ? xStart : 0) + 10} y={yEntry + 12} fill="#d1d4dc" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                      ENTRY: {activeFocusedTrade.entry.toFixed(2)}
+                    </text>
+                  )}
+                  {ySL != null && (
+                    <text x={(x != null ? xStart : 0) + 10} y={ySL + 12} fill="#ff4d4d" fontSize="9" fontWeight="bold" fontFamily="monospace">
+                      STOP: {activeFocusedTrade.stopLoss.toFixed(2)}
+                    </text>
+                  )}
+                </g>
+              )}
+              <text
+                x={(x != null ? xStart : 0) + 4}
+                y={(yTop != null && yBottom != null) ? Math.min(yTop, yBottom) - 12 : 22}
+                fill="#00f2ff"
+                fontSize="10"
+                fontFamily="'JetBrains Mono', monospace"
+                fontWeight="black"
+                className="uppercase"
+              >
+                {activeFocusedTrade.symbol} | {activeFocusedTrade.type} SIGNAL {x == null ? '(OFF-SCREEN)' : ''}
+              </text>
+            </>
           );
         })()}
       </svg>

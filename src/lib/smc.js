@@ -51,16 +51,22 @@ export const detectSMC = (data, symbol = 'UNKNOWN') => {
   }
 
   // --- Order Blocks (OB) ---
-  // A Bullish OB is the last bearish candle before a strong bullish expansion
-  for (let i = 2; i < data.length - 5; i++) {
+  // Bullish OB: last bearish candle before a strong bullish impulse with breakout.
+  // Bearish OB: last bullish candle before a strong bearish impulse with breakdown.
+  for (let i = 30; i < data.length - 6; i++) {
     const c = data[i];
-    const next = data[i + 1];
-    
-    // Check for "Impulsive Move" (Expansion)
-    const expansion = data[i + 3].close - data[i + 1].open;
+    const lookback = data.slice(i - 20, i);
+    const avgBody = lookback.reduce((acc, d) => acc + Math.abs(d.close - d.open), 0) / Math.max(1, lookback.length);
     const bodySize = Math.abs(c.close - c.open);
-    
-    if (expansion > bodySize * 3 && c.close < c.open) {
+    const impulseUp = data[i + 4].close - data[i + 1].open;
+    const impulseDown = data[i + 1].open - data[i + 4].close;
+    const brokeRecentHigh = data[i + 4].close > Math.max(...lookback.map((d) => d.high));
+    const brokeRecentLow = data[i + 4].close < Math.min(...lookback.map((d) => d.low));
+    const volumeBurst =
+      Number(data[i + 1].volume || 0) + Number(data[i + 2].volume || 0) >
+      Number(c.volume || 0) * 1.5;
+
+    if (c.close < c.open && impulseUp > avgBody * 2.5 && brokeRecentHigh && volumeBurst && bodySize > avgBody * 0.5) {
       obs.push({ 
         time: c.time, 
         type: 'Bullish OB', 
@@ -69,7 +75,7 @@ export const detectSMC = (data, symbol = 'UNKNOWN') => {
         low: c.low,
         sentiment: 'bull' 
       });
-    } else if (expansion < -bodySize * 3 && c.close > c.open) {
+    } else if (c.close > c.open && impulseDown > avgBody * 2.5 && brokeRecentLow && volumeBurst && bodySize > avgBody * 0.5) {
       obs.push({ 
         time: c.time, 
         type: 'Bearish OB', 
@@ -85,7 +91,7 @@ export const detectSMC = (data, symbol = 'UNKNOWN') => {
   const latestPrice = data[data.length - 1].close;
   const activeOB = obs.filter(ob =>
     ob.sentiment === 'bull' ? latestPrice > ob.price : latestPrice < ob.price
-  ).slice(-3);
+  );
 
   activeOB.forEach(ob => {
     const entry = ob.sentiment === 'bull' ? ob.high : ob.low;
@@ -99,6 +105,11 @@ export const detectSMC = (data, symbol = 'UNKNOWN') => {
       target,
       stopLoss,
       time: ob.time,
+      ob: {
+        high: ob.high,
+        low: ob.low,
+        sentiment: ob.sentiment,
+      },
       range: {
         min: Math.min(entry, target, stopLoss),
         max: Math.max(entry, target, stopLoss),

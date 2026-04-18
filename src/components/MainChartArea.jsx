@@ -16,12 +16,14 @@ const MainChartArea = ({
   activeIndicators,
   activePatterns,
   showGrid,
+  candleStyle,
   onInfoClick,
   fnoData,
   fnoStrike,
   /** Index (NIFTY/BANKNIFTY/FINNIFTY) OHLC for FNO left “spot” pane when equity stream has no bars for that symbol */
   fnoSpotData = [],
   fnoSpotLoading = false,
+  focusedTrade = null,
 }) => {
   const spotSeriesForFno =
     Array.isArray(fnoSpotData) && fnoSpotData.length > 0 ? fnoSpotData : data;
@@ -40,7 +42,9 @@ const MainChartArea = ({
               activeIndicators={activeIndicators}
               activePatterns={activePatterns}
               showGrid={showGrid}
+              candleStyle={candleStyle}
               onInfoClick={onInfoClick}
+              focusedTrade={focusedTrade}
             />
           </ChartErrorBoundary>
           {!loading && !fnoSpotLoading && spotSeriesForFno.length === 0 && (
@@ -68,7 +72,9 @@ const MainChartArea = ({
                 activeIndicators={activeIndicators}
                 activePatterns={activePatterns}
                 showGrid={showGrid}
+                candleStyle={candleStyle}
                 onInfoClick={onInfoClick}
+                focusedTrade={focusedTrade}
               />
             </ChartErrorBoundary>
             {fnoData.loading && <div className="absolute top-4 right-4 text-[#ffea00] text-[8px] font-black animate-pulse tracking-widest z-10">SYNCING_PE...</div>}
@@ -84,7 +90,9 @@ const MainChartArea = ({
                 activeIndicators={activeIndicators}
                 activePatterns={activePatterns}
                 showGrid={showGrid}
+                candleStyle={candleStyle}
                 onInfoClick={onInfoClick}
+                focusedTrade={focusedTrade}
               />
             </ChartErrorBoundary>
             {fnoData.loading && <div className="absolute top-4 right-4 text-[#ffea00] text-[8px] font-black animate-pulse tracking-widest z-10">SYNCING_CE...</div>}
@@ -149,7 +157,9 @@ const MainChartArea = ({
         activeIndicators={activeIndicators}
         activePatterns={activePatterns}
         showGrid={showGrid}
+        candleStyle={candleStyle}
         onInfoClick={onInfoClick}
+        focusedTrade={focusedTrade}
       />
     </ChartErrorBoundary>
   );

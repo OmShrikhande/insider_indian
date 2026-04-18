@@ -11,6 +11,10 @@ class UpstoxSyncService {
     this.isSyncing = { '15m': false, '1h': false, '1d': false };
     this.intervals = [];
     this.instrumentCache = new Map();
+    this.stockCursor = 0;
+    this.fnoCursor = 0;
+    this.syncBatchSizeStocks = 50;
+    this.syncBatchSizeFno = 50;
   }
 
   resampleCandles(rawCandles, timeframe) {
@@ -69,7 +73,9 @@ class UpstoxSyncService {
       this.syncFnoATM();
     }, 60 * 60 * 1000));
     this.intervals.push(setInterval(() => this.syncTimeframe('1d'), 24 * 60 * 60 * 1000));
-    
+    this.intervals.push(setInterval(() => this.syncStockBatchPerMinute('1h'), 60 * 1000));
+    this.intervals.push(setInterval(() => this.syncFnoBatchPerMinute(), 60 * 1000));
+
     this.syncFnoATM();
   }
 
@@ -77,11 +83,16 @@ class UpstoxSyncService {
     await Promise.all([this.syncTimeframe('15m'), this.syncTimeframe('1h'), this.syncTimeframe('1d')]);
   }
 
-  async getTrackedStocks() {
-    // Limited to top 300 stocks for sync performance
-    const q = 'SELECT symbol, sector, instrument_key FROM stocks_summary ORDER BY symbol LIMIT 300';
+  async getTrackedStocks(limit = 300, offset = 0) {
+    const safeLimit = Math.max(1, Math.min(500, Number(limit) || 300));
+    const safeOffset = Math.max(0, Number(offset) || 0);
+    const q = 'SELECT symbol, sector, instrument_key FROM stocks_summary ORDER BY symbol LIMIT {limit:UInt32} OFFSET {offset:UInt32}';
     try {
-      const result = await client.query({ query: q, format: 'JSONEachRow' });
+      const result = await client.query({
+        query: q,
+        query_params: { limit: safeLimit, offset: safeOffset },
+        format: 'JSONEachRow'
+      });
       const rows = await result.json();
       if (rows.length > 0) return rows;
     } catch (e) {
@@ -168,6 +179,98 @@ class UpstoxSyncService {
       }
     } finally {
       this.isSyncing[timeframe] = false;
+    }
+  }
+
+  async syncStockBatchPerMinute(timeframe = '1h') {
+    if (this.isSyncing[timeframe]) return;
+    this.isSyncing[timeframe] = true;
+    try {
+      const stocks = await this.getTrackedStocks(this.syncBatchSizeStocks, this.stockCursor);
+      if (!stocks.length) {
+        this.stockCursor = 0;
+        return;
+      }
+      const table = timeframe === '15m' ? 'stocks_15min' : (timeframe === '1h' ? 'stocks_hourly' : 'stocks_daily');
+      const lookback = timeframe === '15m' ? 30 : (timeframe === '1h' ? 90 : 365);
+      for (const stock of stocks) {
+        if (upstoxApi.isRateLimitedNow()) break;
+        try {
+          let instrumentKey = this.instrumentCache.get(stock.symbol) || stock.instrument_key;
+          if (!instrumentKey) {
+            const segment = (stock.sector === 'INDEX' || stock.symbol.includes('NIFTY')) ? 'INDEX' : 'EQ';
+            const searchSymbol = stock.symbol === 'NIFTY' ? 'Nifty 50' : (stock.symbol === 'BANKNIFTY' ? 'Nifty Bank' : stock.symbol);
+            const instruments = await upstoxApi.searchInstrument(searchSymbol, 'NSE', segment, 1);
+            if (!instruments.length || !instruments[0].instrument_key) continue;
+            instrumentKey = instruments[0].instrument_key;
+            this.instrumentCache.set(stock.symbol, instrumentKey);
+            await client.command({
+              query: `ALTER TABLE stocks_summary UPDATE instrument_key = {ik:String} WHERE symbol = {s:String}`,
+              query_params: { ik: instrumentKey, s: stock.symbol },
+            });
+          }
+          const rawCandles = await upstoxApi.fetchCandles(instrumentKey, timeframe, lookback);
+          if (!rawCandles.length) continue;
+          const processedCandles = this.resampleCandles(rawCandles, timeframe);
+          const latestRes = await client.query({
+            query: `SELECT max(date) as latest FROM ${table} WHERE symbol = {s:String}`,
+            query_params: { s: stock.symbol },
+            format: 'JSONEachRow'
+          });
+          const latest = (await latestRes.json())[0]?.latest;
+          const latestDate = latest ? new Date(latest) : null;
+          const rows = processedCandles.map(c => {
+            const n = upstoxApi.normalizeCandle(c);
+            return {
+              date: n.date, open: n.open, high: n.high, low: n.low, close: n.close, volume: n.volume,
+              symbol: stock.symbol, timeframe, sector: stock.sector || ''
+            };
+          }).filter(r => !latestDate || new Date(r.date) > latestDate);
+          if (rows.length > 0) {
+            await client.insert({ table, values: rows, format: 'JSONEachRow' });
+          }
+        } catch (error) {
+          console.warn(`[UpstoxSync] batch ${stock.symbol} ${timeframe}:`, error.message);
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      this.stockCursor += stocks.length;
+    } finally {
+      this.isSyncing[timeframe] = false;
+    }
+  }
+
+  async syncFnoBatchPerMinute() {
+    if (process.env.UPSTOX_FNO_SYNC_ENABLED !== 'true') return;
+    try {
+      const result = await client.query({
+        query: `
+          SELECT instrument_key, trading_symbol, underlying_symbol, expiry, strike, option_type
+          FROM fno_contracts
+          WHERE expiry >= today()
+          ORDER BY expiry ASC, trading_symbol ASC
+          LIMIT {limit:UInt32} OFFSET {offset:UInt32}
+        `,
+        query_params: { limit: this.syncBatchSizeFno, offset: this.fnoCursor },
+        format: 'JSONEachRow'
+      });
+      const contracts = await result.json();
+      if (!contracts.length) {
+        this.fnoCursor = 0;
+        return;
+      }
+      for (const contract of contracts) {
+        try {
+          await fnoService.fetchAndStoreOhlcv(contract, '1h');
+          await fnoService.fetchAndStoreOhlcv(contract, '15m');
+        } catch (error) {
+          console.warn(`[UpstoxSync] fno batch ${contract.trading_symbol}:`, error.message);
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      this.fnoCursor += contracts.length;
+    } catch (error) {
+      console.warn('[UpstoxSync] FNO batch failed:', error.message);
     }
   }
 

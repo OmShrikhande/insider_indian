@@ -13,6 +13,8 @@ export const PATTERNS = [
   { id: 'morningStar',       name: 'Morning Star',         category: 'Bullish',       bias: 'bull', description: 'Three-candle bottoming reversal pattern.' },
   { id: 'threeWhiteSoldiers', name: 'Three White Soldiers', category: 'Bullish',      bias: 'bull', description: 'Three consecutive strong bullish candles.' },
   { id: 'tweezerBottom',     name: 'Tweezer Bottom',       category: 'Bullish',       bias: 'bull', description: 'Two candles share same low. Reversal signal.' },
+  { id: 'bullFlag',          name: 'Bull Flag',            category: 'Bullish',       bias: 'bull', description: 'Impulse up followed by controlled pullback continuation.' },
+  { id: 'cupHandle',         name: 'Cup and Handle',       category: 'Bullish',       bias: 'bull', description: 'Rounded accumulation followed by shallow handle breakout.' },
 
   // Bearish Single
   { id: 'shootingStar',      name: 'Shooting Star',        category: 'Bearish',       bias: 'bear', description: 'Long upper wick at top of trend. Bearish reversal.' },
@@ -26,11 +28,15 @@ export const PATTERNS = [
   { id: 'eveningStar',       name: 'Evening Star',         category: 'Bearish',       bias: 'bear', description: 'Three-candle topping reversal pattern.' },
   { id: 'threeBlackCrows',   name: 'Three Black Crows',    category: 'Bearish',       bias: 'bear', description: 'Three consecutive strong bearish candles.' },
   { id: 'tweezerTop',        name: 'Tweezer Top',          category: 'Bearish',       bias: 'bear', description: 'Two candles share same high. Reversal signal.' },
+  { id: 'bearFlag',          name: 'Bear Flag',            category: 'Bearish',       bias: 'bear', description: 'Impulse down followed by weak retrace continuation.' },
+  { id: 'headShoulders',     name: 'Head & Shoulders',     category: 'Bearish',       bias: 'bear', description: 'Classic topping structure with neckline failure.' },
 
   // Neutral
   { id: 'doji',              name: 'Doji',                 category: 'Neutral',       bias: 'neutral', description: 'Open ≈ Close. Indecision candle.' },
   { id: 'spinningTop',       name: 'Spinning Top',         category: 'Neutral',       bias: 'neutral', description: 'Small body with equal upper/lower wicks. Indecision.' },
   { id: 'insideBar',         name: 'Inside Bar',           category: 'Neutral',       bias: 'neutral', description: 'Candle range fully inside previous candle.' },
+  { id: 'outsideBar',        name: 'Outside Bar',          category: 'Neutral',       bias: 'neutral', description: 'Range fully engulfs previous candle; expansion setup.' },
+  { id: 'volatilitySqueeze', name: 'Volatility Squeeze',   category: 'Neutral',       bias: 'neutral', description: 'Compression regime likely followed by expansion.' },
 
   // Order Blocks
   { id: 'bullishOB',         name: 'Bullish OB',           category: 'Order Blocks',  bias: 'bull', description: 'Last bearish candle before strong upward impulse.' },

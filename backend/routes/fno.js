@@ -74,6 +74,39 @@ router.post('/sync/admin', protect, requireAdmin, async (req, res) => {
   }
 });
 
+router.get('/trades', async (req, res) => {
+  try {
+    const { limit = 100 } = req.query;
+    const result = await fnoService.getSuggestedTrades(limit);
+    if (!result.success) return res.status(500).json(result);
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/trades', async (req, res) => {
+  try {
+    const result = await fnoService.createSuggestedTrade(req.body || {});
+    if (!result.success) return res.status(400).json(result);
+    return res.status(201).json(result);
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/trades/:id/action', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action = '', handledBy = '' } = req.body || {};
+    const result = await fnoService.handleSuggestedTrade(id, action, handledBy);
+    if (!result.success) return res.status(400).json(result);
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 /**
  * Index underlying OHLC (NIFTY / BANKNIFTY / FINNIFTY) from ClickHouse (synced via Upstox v3).
  * Query: timeframe=1m|1h|1d, limit
@@ -132,12 +165,7 @@ router.get('/option-chain', async (req, res) => {
   }
 
   try {
-    let result = await fnoService.getOptionChainRaw(String(instrumentKey), String(expiryDate));
-
-    // If not present in DB, fetch from Upstox once and store.
-    if (!result.success || !Array.isArray(result.data) || result.data.length === 0) {
-      result = await fnoService.syncAndGetOptionChainRaw(String(instrumentKey), String(expiryDate));
-    }
+    const result = await fnoService.getOptionChainRaw(String(instrumentKey), String(expiryDate));
 
     if (!result.success) {
       const msg = String(result.error || '');
@@ -169,14 +197,7 @@ router.get('/option-chain', async (req, res) => {
 router.get('/option-chain/:symbol/:expiry', async (req, res) => {
   const { symbol, expiry } = req.params;
   try {
-    let result = await fnoService.getOptionChain(symbol.toUpperCase(), expiry);
-    
-    // If no data, try to sync once
-    if (!result.success || !result.data || result.data.length === 0) {
-      console.log(`[FNO Route] No stored chain for ${symbol} @ ${expiry}. Syncing...`);
-      await fnoService.syncOptionChain(symbol.toUpperCase(), expiry);
-      result = await fnoService.getOptionChain(symbol.toUpperCase(), expiry);
-    }
+    const result = await fnoService.getOptionChain(symbol.toUpperCase(), expiry);
 
     if (result.success) {
       res.json(result);

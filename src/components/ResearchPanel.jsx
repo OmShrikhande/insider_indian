@@ -15,31 +15,41 @@ const ResearchPanel = ({ selectedSymbol }) => {
   const [alertThreshold, setAlertThreshold] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
     const load = async () => {
-      try {
-        const [pcrRes, expRes, mRes, vRes, tRes, sRes, srcRes, aRes] = await Promise.all([
-          apiService.getFnoPCR(selectedSymbol || 'NIFTY'),
-          apiService.getFnoExpiries(selectedSymbol || 'NIFTY'),
-          apiService.getMomentumScreener(8),
-          apiService.getVolatilityScreener(8),
-          apiService.getTrendScreener(8),
-          apiService.getStrategyTemplates(),
-          apiService.getDataSources(),
-          apiService.getAlerts().catch(() => ({ data: [] })),
-        ]);
-        setPcr(pcrRes.data);
-        setExpiries(expRes.data || []);
-        setMomentum(mRes.data || []);
-        setVolatility(vRes.data || []);
-        setTrend(tRes.data || []);
-        setStrategies(sRes.data || []);
-        setSources(srcRes.data || null);
-        setAlerts(aRes.data || []);
-      } catch (error) {
-        console.error('Research panel load error:', error);
-      }
+      const settled = await Promise.allSettled([
+        apiService.getFnoPCR(selectedSymbol || 'NIFTY'),
+        apiService.getFnoExpiries(selectedSymbol || 'NIFTY'),
+        apiService.getMomentumScreener(8),
+        apiService.getVolatilityScreener(8),
+        apiService.getTrendScreener(8),
+        apiService.getStrategyTemplates(),
+        apiService.getDataSources(),
+        apiService.getAlerts().catch(() => ({ data: [] })),
+      ]);
+      if (cancelled) return;
+      const val = (idx, fallback = null) =>
+        settled[idx]?.status === 'fulfilled' ? settled[idx].value : fallback;
+
+      setPcr(val(0)?.data || null);
+      setExpiries(val(1)?.data || []);
+      setMomentum(val(2)?.data || []);
+      setVolatility(val(3)?.data || []);
+      setTrend(val(4)?.data || []);
+      setStrategies(val(5)?.data || []);
+      setSources(val(6)?.data || null);
+      setAlerts(val(7)?.data || []);
+
+      settled.forEach((res) => {
+        if (res.status === 'rejected') {
+          console.error('Research panel load error:', res.reason);
+        }
+      });
     };
     load();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedSymbol]);
 
   const createAlert = async () => {

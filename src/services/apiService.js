@@ -4,38 +4,86 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:1100
 class ApiService {
   constructor() {
     this.baseURL = API_BASE_URL;
+    this.backendDownUntil = 0;
   }
 
   async request(endpoint, options = {}) {
+    if (Date.now() < this.backendDownUntil) {
+      throw new Error('Backend unavailable. Retrying shortly...');
+    }
+
     const url = `${this.baseURL}${endpoint}`;
 
     let token = null;
     try {
       const stored = localStorage.getItem('roxey_token');
       if (stored) token = JSON.parse(stored).token;
-    } catch (e) {}
+    } catch {
+      token = null;
+    }
 
-    const config = {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-        ...options.headers,
-      },
-      ...options,
+    const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 15000;
+    const retries = Number(options.retries) >= 0 ? Number(options.retries) : 1;
+    const retryDelayMs = Number(options.retryDelayMs) > 0 ? Number(options.retryDelayMs) : 500;
+    const { timeoutMs: _timeoutMs, retries: _retries, retryDelayMs: _retryDelayMs, ...fetchOptions } = options;
+
+    const attemptRequest = async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const config = {
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          ...fetchOptions.headers,
+        },
+        signal: controller.signal,
+        ...fetchOptions,
+      };
+
+      try {
+        const response = await fetch(url, config);
+        const contentType = response.headers.get('content-type') || '';
+        const isJson = contentType.includes('application/json');
+
+        if (!response.ok) {
+          if (isJson) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+          }
+          const text = await response.text().catch(() => '');
+          throw new Error(text?.slice(0, 120) || `HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        if (isJson) return await response.json();
+        const text = await response.text();
+        return { success: true, data: text };
+      } finally {
+        clearTimeout(timeout);
+      }
     };
 
-    try {
-      const response = await fetch(url, config);
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        return await attemptRequest();
+      } catch (error) {
+        const timeoutError = error?.name === 'AbortError';
+        const networkError = error instanceof TypeError;
+        const canRetry = attempt < retries && (timeoutError || networkError);
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+        if (canRetry) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs * (attempt + 1)));
+          continue;
+        }
+
+        if (timeoutError) {
+          throw new Error('Request timeout. Please retry.');
+        }
+        if (networkError) {
+          this.backendDownUntil = Date.now() + 2500;
+        }
+        console.error(`API request failed: ${endpoint}`, error);
+        throw error;
       }
-
-      return await response.json();
-    } catch (error) {
-      console.error(`API request failed: ${endpoint}`, error);
-      throw error;
     }
   }
 
@@ -112,6 +160,34 @@ class ApiService {
 
   async getFnoOhlcv(underlying, expiry, strike, timeframe = '1h') {
     return this.request(`/api/fno/ohlcv?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(expiry)}&strike=${encodeURIComponent(strike)}&timeframe=${encodeURIComponent(timeframe)}`);
+  }
+
+  async getFnoSuggestedTrades(limit = 100) {
+    return this.request(`/api/fno/trades?limit=${encodeURIComponent(limit)}`);
+  }
+
+  async createFnoSuggestedTrade(payload) {
+    return this.request('/api/fno/trades', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async handleFnoSuggestedTrade(id, action, handledBy = '') {
+    return this.request(`/api/fno/trades/${encodeURIComponent(id)}/action`, {
+      method: 'POST',
+      body: JSON.stringify({ action, handledBy }),
+    });
+  }
+
+  async getScreenerStatus() {
+    return this.request('/api/screeners/status');
+  }
+
+  async refreshScreener(type) {
+    return this.request(`/api/screeners/refresh?type=${encodeURIComponent(type)}`, {
+      method: 'POST',
+    });
   }
 
   /** NIFTY / BANKNIFTY / FINNIFTY index OHLC (1m, 1h, 1d) from ClickHouse */

@@ -19,6 +19,16 @@ const systemRoutes = require('./routes/system');
 const liveRoutes = require('./routes/live');
 const marketRoutes = require('./routes/market');
 
+// Reduce known noisy ClickHouse warning spam while keeping other warnings visible.
+const originalWarn = console.warn;
+console.warn = (...args) => {
+  const first = String(args[0] || '');
+  if (first.includes('socket was closed or ended before the response was fully read')) {
+    return;
+  }
+  originalWarn(...args);
+};
+
 const app = express();
 
 // Middleware
@@ -114,6 +124,20 @@ async function setupDatabase() {
         updated_at DateTime
       ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (instrument_key, trading_symbol)`
       ,
+      `CREATE TABLE IF NOT EXISTS screener_results (
+        id String,
+        screener_type String,
+        symbol String,
+        close Float64,
+        volume UInt64,
+        score Float64,
+        trend_type String,
+        rank UInt32,
+        created_at DateTime,
+        updated_at DateTime
+      ) ENGINE = MergeTree()
+      ORDER BY (screener_type, rank, created_at)
+      TTL updated_at + INTERVAL 1 DAY`,
       `CREATE TABLE IF NOT EXISTS alerts (
         id String,
         user_id String,
@@ -201,7 +225,28 @@ async function setupDatabase() {
         live_ts UInt64,
         raw_json String,
         ingested_at DateTime
-      ) ENGINE = ReplacingMergeTree(ingested_at) ORDER BY (instrument_key, interval)`
+      ) ENGINE = ReplacingMergeTree(ingested_at) ORDER BY (instrument_key, interval)`,
+      `CREATE TABLE IF NOT EXISTS trade_suggestions (
+        id String,
+        market_segment String,
+        instrument_type String,
+        option_type String,
+        symbol String,
+        side String,
+        strike Nullable(Float64),
+        expiry Nullable(Date),
+        entry Float64,
+        budget Float64,
+        target Float64,
+        stop_loss Float64,
+        analysis String,
+        status String,
+        handled_by String,
+        handled_action String,
+        handled_at Nullable(DateTime),
+        source String,
+        created_at DateTime
+      ) ENGINE = ReplacingMergeTree(created_at) ORDER BY (id, created_at)`
     ];
 
     for (const query of createQueries) {
@@ -321,7 +366,13 @@ async function setupDatabase() {
       'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS put_volume UInt64 DEFAULT 0',
       'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS call_options_json String DEFAULT \'\'',
       'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS put_options_json String DEFAULT \'\'',
-      'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS rate_type String DEFAULT \'REAL\''
+      'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS rate_type String DEFAULT \'REAL\'',
+      'ALTER TABLE trade_suggestions ADD COLUMN IF NOT EXISTS status String DEFAULT \'open\'',
+      'ALTER TABLE trade_suggestions ADD COLUMN IF NOT EXISTS budget Float64 DEFAULT 0',
+      'ALTER TABLE trade_suggestions ADD COLUMN IF NOT EXISTS handled_by String DEFAULT \'\'',
+      'ALTER TABLE trade_suggestions ADD COLUMN IF NOT EXISTS handled_action String DEFAULT \'\'',
+      'ALTER TABLE trade_suggestions ADD COLUMN IF NOT EXISTS handled_at Nullable(DateTime)',
+      'ALTER TABLE trade_suggestions ADD COLUMN IF NOT EXISTS source String DEFAULT \'research_panel\''
     ];
 
     for (const q of migrationQueries) {

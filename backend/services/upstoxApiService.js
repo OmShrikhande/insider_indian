@@ -3,6 +3,8 @@ class UpstoxApiService {
     this.baseUrl = (process.env.UPSTOX_BASE_URL || 'https://api.upstox.com/v2').replace(/\/$/, '');
     this.accessToken = process.env.UPSTOX_ACCESS_TOKEN || '';
     this.rateLimitedUntil = 0;
+    this.invalidInstrumentKeys = new Set();
+    this.loggedInvalidKeys = new Set();
   }
 
   getV2BaseUrl() {
@@ -72,6 +74,20 @@ class UpstoxApiService {
     this.rateLimitedUntil = Math.max(this.rateLimitedUntil, until);
   }
 
+  shouldSkipInstrumentKey(instrumentKey) {
+    return this.invalidInstrumentKeys.has(String(instrumentKey || '').trim());
+  }
+
+  markInvalidInstrumentKey(instrumentKey) {
+    const key = String(instrumentKey || '').trim();
+    if (!key) return;
+    this.invalidInstrumentKeys.add(key);
+    if (!this.loggedInvalidKeys.has(key)) {
+      this.loggedInvalidKeys.add(key);
+      console.warn(`[UpstoxAPI] Marked invalid instrument key and will skip further requests: ${key}`);
+    }
+  }
+
   extractRetryAfterMs(response, bodyText = '') {
     const header = Number(response.headers.get('retry-after') || 0);
     if (header > 0) return header * 1000;
@@ -120,6 +136,7 @@ class UpstoxApiService {
   async fetchCandles(instrumentKey, timeframe = '1h', lookbackDays = 30) {
     if (!process.env.UPSTOX_ACCESS_TOKEN && !this.accessToken) return [];
     if (this.isRateLimitedNow()) return [];
+    if (this.shouldSkipInstrumentKey(instrumentKey)) return [];
 
     const toDate = new Date();
     const fromDate = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
@@ -141,6 +158,9 @@ class UpstoxApiService {
           const waitMs = this.extractRetryAfterMs(response, txt);
           this.markRateLimited(waitMs);
           console.warn(`[UpstoxAPI] Candle rate-limited. Cooling down for ${Math.ceil(waitMs / 1000)}s`);
+        }
+        if (response.status === 400 || response.status === 404) {
+          this.markInvalidInstrumentKey(instrumentKey);
         }
         console.warn(`[UpstoxAPI] Candle fetch failed [${response.status}] for ${instrumentKey}`);
         return [];

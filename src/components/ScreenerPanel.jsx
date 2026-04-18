@@ -1,17 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import apiService from '../services/apiService';
 
 const ScreenerStatus = ({ activeTab, onStatusUpdate }) => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const requestInFlightRef = useRef(false);
 
   useEffect(() => {
     const fetchStatus = async () => {
+      if (requestInFlightRef.current) return;
       try {
+        requestInFlightRef.current = true;
         setLoading(true);
-        const response = await fetch('/api/screeners/status');
-        const result = await response.json();
+        const result = await apiService.getScreenerStatus();
         if (result.success) {
           setStatus(result.data);
           onStatusUpdate?.(result.data);
@@ -20,11 +22,12 @@ const ScreenerStatus = ({ activeTab, onStatusUpdate }) => {
         console.error('Failed to fetch screener status:', error);
       } finally {
         setLoading(false);
+        requestInFlightRef.current = false;
       }
     };
 
     fetchStatus();
-    const interval = setInterval(fetchStatus, 5000); // Update every 5 seconds
+    const interval = setInterval(fetchStatus, 15000);
 
     return () => clearInterval(interval);
   }, [activeTab, onStatusUpdate]);
@@ -32,10 +35,7 @@ const ScreenerStatus = ({ activeTab, onStatusUpdate }) => {
   const handleRefresh = async () => {
     try {
       setRefreshing(true);
-      const response = await fetch(`/api/screeners/refresh?type=${activeTab}`, {
-        method: 'POST'
-      });
-      const result = await response.json();
+      const result = await apiService.refreshScreener(activeTab);
       if (result.success) {
         console.log('Refresh triggered successfully');
         // Status will update automatically via the interval
@@ -124,9 +124,9 @@ const ScreenerPanel = ({ onClose, isRightSidebarCollapsed }) => {
       setLoading(true);
       try {
         let res;
-        if (activeTab === 'momentum') res = await apiService.getMomentumScreener(50);
-        else if (activeTab === 'volatility') res = await apiService.getVolatilityScreener(50);
-        else res = await apiService.getTrendScreener(50);
+        if (activeTab === 'momentum') res = await apiService.getMomentumScreener(1000);
+        else if (activeTab === 'volatility') res = await apiService.getVolatilityScreener(1000);
+        else res = await apiService.getTrendScreener(1000);
 
         if (res.success) {
           setData(res.data);
