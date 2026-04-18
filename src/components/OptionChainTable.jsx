@@ -30,6 +30,10 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) =
         put_delta: row.put_delta ?? putGreeks.delta ?? 0,
         call_iv: row.call_iv ?? callGreeks.iv ?? 0,
         put_iv: row.put_iv ?? putGreeks.iv ?? 0,
+        call_vega: row.call_vega ?? callGreeks.vega ?? 0,
+        put_vega: row.put_vega ?? putGreeks.vega ?? 0,
+        call_theta: row.call_theta ?? callGreeks.theta ?? 0,
+        put_theta: row.put_theta ?? putGreeks.theta ?? 0,
       };
     });
   };
@@ -85,24 +89,28 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) =
   const fmtInt = (value) => toNum(value).toLocaleString('en-IN');
 
   return (
-    <div className="overflow-x-auto custom-scrollbar bg-[#050505] rounded-xl border border-[#1c2127] shadow-2xl">
-      <table className="w-full text-[10px] font-mono border-collapse">
+    <div className="h-full overflow-auto custom-scrollbar bg-[#050505] rounded-xl border border-[#1c2127] shadow-2xl">
+      <table className="min-w-[1200px] w-full text-[10px] font-mono border-collapse">
         <thead className="sticky top-0 bg-[#0a0a0a] z-10">
           <tr className="border-b border-[#1c2127]">
-            <th colSpan="5" className="py-2 text-[#00f2ff] bg-[#00f2ff]/5 border-r border-[#1c2127]">CALLS (BULL_V)</th>
-            <th className="py-2 text-[#848e9c]">STRIKE</th>
-            <th colSpan="5" className="py-2 text-[#ff4d4d] bg-[#ff4d4d]/5 border-l border-[#1c2127]">PUTS (BEAR_V)</th>
+            <th colSpan="7" className="py-2 text-[#00f2ff] bg-[#00f2ff]/5 border-r border-[#1c2127]">CALLS (BULL_V)</th>
+            <th className="py-2 text-[#848e9c] text-center">STRIKE</th>
+            <th colSpan="7" className="py-2 text-[#ff4d4d] bg-[#ff4d4d]/5 border-l border-[#1c2127]">PUTS (BEAR_V)</th>
           </tr>
           <tr className="text-[#5d606b] border-b border-[#1c2127] bg-[#0d0d0d]">
              <th className="py-2 px-1">IV</th>
              <th className="py-2 px-1">DELTA</th>
+             <th className="py-2 px-1">VEGA</th>
+             <th className="py-2 px-1">THETA</th>
              <th className="py-2 px-1 text-right">OI</th>
              <th className="py-2 px-1 text-right">VOLUME</th>
              <th className="py-2 px-1 text-[#00f2ff] text-right border-r border-[#1c2127]">LTP</th>
-             <th className="py-2 px-2 bg-[#1c2127]/20 text-white font-bold">PRICE</th>
+             <th className="py-2 px-2 bg-[#1c2127]/20 text-white font-bold text-center">PRICE</th>
              <th className="py-2 px-1 text-[#ff4d4d] text-left border-l border-[#1c2127]">LTP</th>
              <th className="py-2 px-1 text-left">VOLUME</th>
              <th className="py-2 px-1 text-left">OI</th>
+             <th className="py-2 px-1">THETA</th>
+             <th className="py-2 px-1">VEGA</th>
              <th className="py-2 px-1">DELTA</th>
              <th className="py-2 px-1">IV</th>
           </tr>
@@ -113,6 +121,8 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) =
               {/* CALLS */}
               <td className="py-2 px-1 text-center text-[#555] group-hover:text-[#848e9c]">{fmt(row.call_iv, 1)}</td>
               <td className="py-2 px-1 text-center text-[#555] group-hover:text-[#848e9c]">{fmt(row.call_delta, 2)}</td>
+              <td className="py-2 px-1 text-center text-[#555] group-hover:text-[#848e9c]">{fmt(row.call_vega, 2)}</td>
+              <td className="py-2 px-1 text-center text-[#555] group-hover:text-[#848e9c]">{fmt(row.call_theta, 2)}</td>
               <td className="py-2 px-1 text-right text-[#848e9c]">{fmtInt(row.call_oi)}</td>
               <td className="py-2 px-1 text-right text-[#848e9c]">{fmtInt(row.call_volume)}</td>
               <td 
@@ -123,7 +133,7 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) =
               </td>
 
               {/* STRIKE */}
-              <td className="py-2 px-2 text-center bg-[#00f2ff]/5 font-bold text-white shadow-[inset_0_0_10px_rgba(0,242,255,0.05)]">
+              <td className="py-2 px-2 text-center bg-[#00f2ff]/5 font-bold text-white shadow-[inset_0_0_10px_rgba(0,242,255,0.05)] whitespace-nowrap">
                 {row.strike_price}
               </td>
 
@@ -136,6 +146,8 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) =
               </td>
               <td className="py-2 px-1 text-left text-[#848e9c]">{fmtInt(row.put_volume)}</td>
               <td className="py-2 px-1 text-left text-[#848e9c]">{fmtInt(row.put_oi)}</td>
+              <td className="py-2 px-1 text-left text-[#555] group-hover:text-[#848e9c]">{fmt(row.put_theta, 2)}</td>
+              <td className="py-2 px-1 text-left text-[#555] group-hover:text-[#848e9c]">{fmt(row.put_vega, 2)}</td>
               <td className="py-2 px-1 text-left text-[#555] group-hover:text-[#848e9c]">{fmt(row.put_delta, 2)}</td>
               <td className="py-2 px-1 text-center text-[#555] group-hover:text-[#848e9c]">{fmt(row.put_iv, 1)}</td>
             </tr>

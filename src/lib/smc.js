@@ -3,7 +3,7 @@
  * Detects BOS, CHoCH, and Order Blocks with Volume confirmation
  */
 
-export const detectSMC = (data) => {
+export const detectSMC = (data, symbol = 'UNKNOWN') => {
   if (data.length < 50) return { bos: [], choch: [], obs: [], suggestions: [] };
 
   const bos = [];
@@ -93,7 +93,7 @@ export const detectSMC = (data) => {
     const stopLoss = ob.sentiment === 'bull' ? ob.low : ob.high;
 
     suggestions.push({
-      symbol: ob.symbol,
+      symbol,
       type: ob.sentiment === 'bull' ? 'LONG' : 'SHORT',
       entry,
       target,
@@ -111,4 +111,96 @@ export const detectSMC = (data) => {
   });
 
   return { bos, choch, obs, suggestions };
+};
+
+export const detectChainSMC = (chainRows = [], symbol = 'NIFTY', expiry = '') => {
+  if (!Array.isArray(chainRows) || chainRows.length < 3) return [];
+
+  const toNum = (v) => Number(v || 0);
+  const rows = chainRows
+    .map((row) => {
+      const strike = toNum(row.strike_price);
+      const callDelta = toNum(row.call_delta);
+      const putDelta = Math.abs(toNum(row.put_delta));
+      const callIv = toNum(row.call_iv);
+      const putIv = toNum(row.put_iv);
+      const callOi = toNum(row.call_oi);
+      const putOi = toNum(row.put_oi);
+      const callVolume = toNum(row.call_volume);
+      const putVolume = toNum(row.put_volume);
+      const callLtp = toNum(row.call_ltp);
+      const putLtp = toNum(row.put_ltp);
+      const thetaSkew = toNum(row.call_theta) - Math.abs(toNum(row.put_theta));
+
+      return {
+        strike,
+        callDelta,
+        putDelta,
+        callIv,
+        putIv,
+        callOi,
+        putOi,
+        callVolume,
+        putVolume,
+        callLtp,
+        putLtp,
+        thetaSkew,
+        callPressure: (callOi + callVolume) * Math.max(0.1, callDelta),
+        putPressure: (putOi + putVolume) * Math.max(0.1, putDelta),
+      };
+    })
+    .filter((r) => r.strike > 0)
+    .sort((a, b) => a.strike - b.strike);
+
+  if (!rows.length) return [];
+
+  const strongestCall = [...rows].sort((a, b) => b.callPressure - a.callPressure)[0];
+  const strongestPut = [...rows].sort((a, b) => b.putPressure - a.putPressure)[0];
+  const atmRow = rows[Math.floor(rows.length / 2)];
+
+  const trades = [];
+  if (strongestCall) {
+    trades.push({
+      symbol: `${symbol}${expiry ? ` ${expiry}` : ''}`,
+      type: 'LONG',
+      entry: strongestCall.callLtp || strongestCall.strike * 0.01,
+      target: (strongestCall.callLtp || strongestCall.strike * 0.01) * 1.15,
+      stopLoss: (strongestCall.callLtp || strongestCall.strike * 0.01) * 0.88,
+      time: Math.floor(Date.now() / 1000),
+      reason: `Chain bullish bias near strike ${strongestCall.strike}: CE pressure > PE, delta support ${strongestCall.callDelta.toFixed(2)}.`,
+      confidence: Math.min(95, 60 + Math.round(strongestCall.callDelta * 20)),
+      source: 'CHAIN_ALPHA',
+    });
+  }
+
+  if (strongestPut) {
+    trades.push({
+      symbol: `${symbol}${expiry ? ` ${expiry}` : ''}`,
+      type: 'SHORT',
+      entry: strongestPut.putLtp || strongestPut.strike * 0.01,
+      target: (strongestPut.putLtp || strongestPut.strike * 0.01) * 1.15,
+      stopLoss: (strongestPut.putLtp || strongestPut.strike * 0.01) * 0.88,
+      time: Math.floor(Date.now() / 1000),
+      reason: `Chain bearish bias near strike ${strongestPut.strike}: PE pressure > CE, put-delta ${strongestPut.putDelta.toFixed(2)}.`,
+      confidence: Math.min(95, 60 + Math.round(strongestPut.putDelta * 20)),
+      source: 'CHAIN_ALPHA',
+    });
+  }
+
+  if (atmRow) {
+    const skew = atmRow.callIv - atmRow.putIv;
+    trades.push({
+      symbol: `${symbol}${expiry ? ` ${expiry}` : ''}`,
+      type: skew >= 0 ? 'LONG' : 'SHORT',
+      entry: skew >= 0 ? atmRow.callLtp : atmRow.putLtp,
+      target: (skew >= 0 ? atmRow.callLtp : atmRow.putLtp) * 1.1,
+      stopLoss: (skew >= 0 ? atmRow.callLtp : atmRow.putLtp) * 0.9,
+      time: Math.floor(Date.now() / 1000),
+      reason: `ATM IV skew at ${atmRow.strike}: ${skew >= 0 ? 'calls' : 'puts'} priced richer; theta skew ${atmRow.thetaSkew.toFixed(2)}.`,
+      confidence: 70,
+      source: 'CHAIN_SKEW',
+    });
+  }
+
+  return trades.slice(0, 4);
 };

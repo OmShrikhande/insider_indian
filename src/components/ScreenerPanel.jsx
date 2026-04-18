@@ -6,6 +6,13 @@ const ScreenerPanel = ({ onClose }) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  const summary = {
+    total: data.length,
+    avgClose: data.length ? (data.reduce((acc, item) => acc + Number(item.close || 0), 0) / data.length) : 0,
+    avgVolume: data.length ? (data.reduce((acc, item) => acc + Number(item.volume || 0), 0) / data.length) : 0,
+    topSymbol: data[0]?.symbol || '--',
+  };
+
   useEffect(() => {
     const fetchScreener = async () => {
       setLoading(true);
@@ -36,9 +43,14 @@ const ScreenerPanel = ({ onClose }) => {
           <span className="w-2 h-2 bg-[#00f2ff] animate-pulse rounded-full"></span>
           MARKET_SCREENER_NODE
         </h2>
-        <button onClick={onClose} className="text-[#ff003c] hover:text-white transition-colors uppercase text-sm tracking-widest font-bold">
-          [ CLOSE_NODE ]
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={onClose} className="text-[#00f2ff] border border-[#00f2ff]/30 bg-[#00f2ff]/10 hover:bg-[#00f2ff]/20 px-3 py-2 rounded transition-colors uppercase text-[10px] tracking-widest font-bold">
+            [ RETURN_DASHBOARD ]
+          </button>
+          <button onClick={onClose} className="text-[#ff003c] hover:text-white transition-colors uppercase text-sm tracking-widest font-bold">
+            [ CLOSE_NODE ]
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-4 mb-6">
@@ -53,6 +65,25 @@ const ScreenerPanel = ({ onClose }) => {
             {tab}_scan
           </button>
         ))}
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <div className="border border-[#1c2127] rounded-lg bg-[#050505] p-3">
+          <div className="text-[9px] text-[#5d606b] uppercase">Total Signals</div>
+          <div className="text-[#00f2ff] text-lg font-black">{summary.total}</div>
+        </div>
+        <div className="border border-[#1c2127] rounded-lg bg-[#050505] p-3">
+          <div className="text-[9px] text-[#5d606b] uppercase">Avg Close</div>
+          <div className="text-white text-lg font-black">{summary.avgClose.toFixed(2)}</div>
+        </div>
+        <div className="border border-[#1c2127] rounded-lg bg-[#050505] p-3">
+          <div className="text-[9px] text-[#5d606b] uppercase">Avg Volume</div>
+          <div className="text-white text-lg font-black">{Math.round(summary.avgVolume).toLocaleString('en-IN')}</div>
+        </div>
+        <div className="border border-[#1c2127] rounded-lg bg-[#050505] p-3">
+          <div className="text-[9px] text-[#5d606b] uppercase">Top Symbol</div>
+          <div className="text-[#39ff14] text-lg font-black">{summary.topSymbol}</div>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto elite-scrollbar border border-[#1c2127] rounded-lg bg-[#050505]">

@@ -5,7 +5,8 @@ import authService from '../services/authService';
 import useStockData from '../hooks/useStockData';
 import useFnoData from '../hooks/useFnoData';
 import { useFnoLogic } from '../hooks/useFnoLogic';
-import { detectSMC } from '../lib/smc';
+import { detectSMC, detectChainSMC } from '../lib/smc';
+import apiService from '../services/apiService';
 import { INDICATORS } from '../lib/indicatorRegistry';
 import { DEFAULT_PATTERNS } from '../lib/patternRegistry';
 
@@ -42,6 +43,7 @@ const Dashboard = () => {
   const [showScreener, setShowScreener] = useState(false);
   const [showOptionChain, setShowOptionChain] = useState(false);
   const [smcData, setSmcData] = useState({ suggestions: [] });
+  const [chainRows, setChainRows] = useState([]);
 
   // --- Specialized Hooks ---
   const { data, news, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
@@ -50,8 +52,37 @@ const Dashboard = () => {
 
   // --- Effects ---
   useEffect(() => {
-    if (data.length > 0) setSmcData(detectSMC(data));
-  }, [data]);
+    if (data.length > 0) setSmcData(detectSMC(data, selectedSymbol));
+  }, [data, selectedSymbol]);
+
+  useEffect(() => {
+    const loadChainRows = async () => {
+      if (!fnoLogic.isFnoMode || !fnoLogic.fnoExpiry) {
+        setChainRows([]);
+        return;
+      }
+      try {
+        const resolvedKey = selectedSymbol?.includes('|')
+          ? selectedSymbol
+          : ({
+            NIFTY: 'NSE_INDEX|Nifty 50',
+            BANKNIFTY: 'NSE_INDEX|Nifty Bank',
+            FINNIFTY: 'NSE_INDEX|Nifty Fin Service',
+            MIDCPNIFTY: 'NSE_INDEX|Nifty Mid Select',
+          }[String(selectedSymbol || '').toUpperCase()] || `NSE_EQ|${String(selectedSymbol || '').toUpperCase()}`);
+
+        const response = await apiService.getOptionChainByInstrument(resolvedKey, fnoLogic.fnoExpiry);
+        const rows = Array.isArray(response?.data) ? response.data : [];
+        setChainRows(rows);
+      } catch (err) {
+        setChainRows([]);
+      }
+    };
+    loadChainRows();
+  }, [fnoLogic.isFnoMode, fnoLogic.fnoExpiry, selectedSymbol]);
+
+  const chainTrades = detectChainSMC(chainRows, selectedSymbol, fnoLogic.fnoExpiry);
+  const allTrades = [...chainTrades, ...(smcData.suggestions || [])];
 
   // Global Hotkeys & Listeners
   useEffect(() => {
@@ -226,7 +257,7 @@ const Dashboard = () => {
         {!isRightSidebarCollapsed && (
           <div className="flex-1 overflow-hidden">
             {activeRightPanel === 'news' && <NewsList selectedSymbol={selectedSymbol} />}
-            {activeRightPanel === 'trades' && <TradeFeed trades={smcData.suggestions} />}
+            {activeRightPanel === 'trades' && <TradeFeed trades={allTrades} />}
             {activeRightPanel === 'research' && <ResearchPanel selectedSymbol={selectedSymbol} />}
           </div>
         )}
