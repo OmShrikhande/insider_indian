@@ -1,42 +1,64 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import apiService from '../services/apiService';
 
-const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) => {
+function normalizeChainRows(rows) {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row) => {
+    const callOptions = row.call_options || {};
+    const putOptions = row.put_options || {};
+    const callMarket = callOptions.market_data || {};
+    const putMarket = putOptions.market_data || {};
+    const callGreeks = callOptions.option_greeks || {};
+    const putGreeks = putOptions.option_greeks || {};
+
+    return {
+      underlying_spot_price: row.underlying_spot_price != null ? Number(row.underlying_spot_price) : null,
+      strike_price: row.strike_price,
+      call_key: row.call_key || callOptions.instrument_key || '',
+      put_key: row.put_key || putOptions.instrument_key || '',
+      call_ltp: row.call_ltp ?? callMarket.ltp ?? 0,
+      put_ltp: row.put_ltp ?? putMarket.ltp ?? 0,
+      call_oi: row.call_oi ?? callMarket.oi ?? 0,
+      put_oi: row.put_oi ?? putMarket.oi ?? 0,
+      call_volume: row.call_volume ?? callMarket.volume ?? 0,
+      put_volume: row.put_volume ?? putMarket.volume ?? 0,
+      call_delta: row.call_delta ?? callGreeks.delta ?? 0,
+      put_delta: row.put_delta ?? putGreeks.delta ?? 0,
+      call_iv: row.call_iv ?? callGreeks.iv ?? 0,
+      put_iv: row.put_iv ?? putGreeks.iv ?? 0,
+      call_vega: row.call_vega ?? callGreeks.vega ?? 0,
+      put_vega: row.put_vega ?? putGreeks.vega ?? 0,
+      call_theta: row.call_theta ?? callGreeks.theta ?? 0,
+      put_theta: row.put_theta ?? putGreeks.theta ?? 0,
+    };
+  });
+}
+
+const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract, spotPrice, onOpenIndexChart }) => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const normalizeRows = (rows) => {
-    if (!Array.isArray(rows)) return [];
-    return rows.map((row) => {
-      const callOptions = row.call_options || {};
-      const putOptions = row.put_options || {};
-      const callMarket = callOptions.market_data || {};
-      const putMarket = putOptions.market_data || {};
-      const callGreeks = callOptions.option_greeks || {};
-      const putGreeks = putOptions.option_greeks || {};
+  const resolvedSpot = useMemo(() => {
+    const s = spotPrice != null && !Number.isNaN(Number(spotPrice)) ? Number(spotPrice) : null;
+    if (s != null) return s;
+    const fromRow = data[0]?.underlying_spot_price;
+    return fromRow != null && !Number.isNaN(Number(fromRow)) ? Number(fromRow) : null;
+  }, [spotPrice, data]);
 
-      return {
-        strike_price: row.strike_price,
-        call_key: row.call_key || callOptions.instrument_key || '',
-        put_key: row.put_key || putOptions.instrument_key || '',
-        call_ltp: row.call_ltp ?? callMarket.ltp ?? 0,
-        put_ltp: row.put_ltp ?? putMarket.ltp ?? 0,
-        call_oi: row.call_oi ?? callMarket.oi ?? 0,
-        put_oi: row.put_oi ?? putMarket.oi ?? 0,
-        call_volume: row.call_volume ?? callMarket.volume ?? 0,
-        put_volume: row.put_volume ?? putMarket.volume ?? 0,
-        call_delta: row.call_delta ?? callGreeks.delta ?? 0,
-        put_delta: row.put_delta ?? putGreeks.delta ?? 0,
-        call_iv: row.call_iv ?? callGreeks.iv ?? 0,
-        put_iv: row.put_iv ?? putGreeks.iv ?? 0,
-        call_vega: row.call_vega ?? callGreeks.vega ?? 0,
-        put_vega: row.put_vega ?? putGreeks.vega ?? 0,
-        call_theta: row.call_theta ?? callGreeks.theta ?? 0,
-        put_theta: row.put_theta ?? putGreeks.theta ?? 0,
-      };
-    });
-  };
+  const atmStrike = useMemo(() => {
+    if (resolvedSpot == null || !data.length) return null;
+    let best = data[0].strike_price;
+    let bestD = Math.abs(Number(best) - resolvedSpot);
+    for (const r of data) {
+      const d = Math.abs(Number(r.strike_price) - resolvedSpot);
+      if (d < bestD) {
+        bestD = d;
+        best = r.strike_price;
+      }
+    }
+    return Number(best);
+  }, [data, resolvedSpot]);
 
   useEffect(() => {
     const fetchChain = async () => {
@@ -49,14 +71,20 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) =
         let response = await apiService.getOptionChainByInstrument(resolvedKey, expiry);
         let rows = Array.isArray(response?.data) ? response.data : [];
 
-        // Backward compatibility fallback for older API responses.
+        if (response?.message && rows.length === 0) {
+          setError(response.message);
+          setData([]);
+          return;
+        }
+
         if (rows.length === 0) {
           response = await apiService.getOptionChain(symbol, expiry);
           rows = Array.isArray(response?.data) ? response.data : [];
         }
 
-        if ((response.success || response.status === 'success') && rows.length >= 0) {
-          setData(normalizeRows(rows));
+        if (response.success || response.status === 'success') {
+          setData(normalizeChainRows(rows));
+          if (!rows.length && response.message) setError(response.message);
         } else {
           setError(response.error);
         }
@@ -90,6 +118,33 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) =
 
   return (
     <div className="h-full overflow-auto custom-scrollbar bg-[#050505] rounded-xl border border-[#1c2127] shadow-2xl">
+      {(resolvedSpot != null || onOpenIndexChart) && (
+        <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-[#1c2127] bg-[#0a0a0a]/95 text-[10px] font-mono">
+          <div className="text-[#848e9c]">
+            {resolvedSpot != null && (
+              <>
+                <span className="text-[#5d606b] mr-2">SPOT</span>
+                <span className="text-[#39ff14] font-bold">{fmt(resolvedSpot, 2)}</span>
+                {atmStrike != null && (
+                  <span className="text-[#5d606b] ml-3">ATM_STRIKE</span>
+                )}
+                {atmStrike != null && (
+                  <span className="text-[#00f2ff] font-bold ml-1">{atmStrike}</span>
+                )}
+              </>
+            )}
+          </div>
+          {typeof onOpenIndexChart === 'function' && (
+            <button
+              type="button"
+              onClick={onOpenIndexChart}
+              className="px-3 py-1 rounded border border-[#00f2ff]/40 bg-[#00f2ff]/10 text-[#00f2ff] text-[10px] font-bold tracking-widest hover:bg-[#00f2ff]/20"
+            >
+              INDEX_CHART
+            </button>
+          )}
+        </div>
+      )}
       <table className="min-w-[1200px] w-full text-[10px] font-mono border-collapse">
         <thead className="sticky top-0 bg-[#0a0a0a] z-10">
           <tr className="border-b border-[#1c2127]">
@@ -116,8 +171,15 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) =
           </tr>
         </thead>
         <tbody>
-          {data.map((row, idx) => (
-            <tr key={idx} className="border-b border-[#1c2127]/30 hover:bg-white/5 transition-colors group">
+          {data.map((row, idx) => {
+            const isAtm = atmStrike != null && Number(row.strike_price) === atmStrike;
+            return (
+            <tr
+              key={idx}
+              className={`border-b border-[#1c2127]/30 hover:bg-white/5 transition-colors group ${
+                isAtm ? 'bg-[#00f2ff]/10 ring-1 ring-inset ring-[#00f2ff]/35' : ''
+              }`}
+            >
               {/* CALLS */}
               <td className="py-2 px-1 text-center text-[#555] group-hover:text-[#848e9c]">{fmt(row.call_iv, 1)}</td>
               <td className="py-2 px-1 text-center text-[#555] group-hover:text-[#848e9c]">{fmt(row.call_delta, 2)}</td>
@@ -133,7 +195,9 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) =
               </td>
 
               {/* STRIKE */}
-              <td className="py-2 px-2 text-center bg-[#00f2ff]/5 font-bold text-white shadow-[inset_0_0_10px_rgba(0,242,255,0.05)] whitespace-nowrap">
+              <td className={`py-2 px-2 text-center font-bold whitespace-nowrap shadow-[inset_0_0_10px_rgba(0,242,255,0.05)] ${
+                isAtm ? 'bg-[#39ff14]/20 text-[#39ff14]' : 'bg-[#00f2ff]/5 text-white'
+              }`}>
                 {row.strike_price}
               </td>
 
@@ -151,7 +215,8 @@ const OptionChainTable = ({ symbol, instrumentKey, expiry, onSelectContract }) =
               <td className="py-2 px-1 text-left text-[#555] group-hover:text-[#848e9c]">{fmt(row.put_delta, 2)}</td>
               <td className="py-2 px-1 text-center text-[#555] group-hover:text-[#848e9c]">{fmt(row.put_iv, 1)}</td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

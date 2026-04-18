@@ -1,5 +1,6 @@
 const express = require('express');
 const fnoService = require('../services/fnoService');
+const indexOhlcService = require('../services/indexOhlcService');
 const { protect, requireAdmin } = require('../middleware/authMiddleware');
 
 const router = express.Router();
@@ -73,6 +74,37 @@ router.post('/sync/admin', protect, requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * Index underlying OHLC (NIFTY / BANKNIFTY / FINNIFTY) from ClickHouse (synced via Upstox v3).
+ * Query: timeframe=1m|1h|1d, limit
+ */
+router.get('/index-ohlc', async (req, res) => {
+  try {
+    const { underlying = 'NIFTY', timeframe = '1h', limit = 5000 } = req.query;
+    const data = await indexOhlcService.getOhlc(String(underlying), String(timeframe), Number(limit));
+    res.json({ success: true, underlying: String(underlying).toUpperCase(), timeframe, count: data.length, data });
+  } catch (error) {
+    console.error('Index OHLC error:', error.message);
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/index-ohlc/sync', protect, requireAdmin, async (req, res) => {
+  try {
+    const { underlying, months } = req.body || {};
+    if (underlying) {
+      const m = Math.min(36, Math.max(1, Number(months) || 24));
+      const r = await indexOhlcService.backfillUnderlying(String(underlying), m, 600);
+      return res.json({ success: true, result: r });
+    }
+    const r = await indexOhlcService.syncAllRecent();
+    return res.json({ success: true, result: r });
+  } catch (error) {
+    console.error('Index OHLC sync error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 router.get('/ohlcv', async (req, res) => {
   try {
     const { underlying, expiry, strike, timeframe = '1h' } = req.query;
@@ -108,6 +140,18 @@ router.get('/option-chain', async (req, res) => {
     }
 
     if (!result.success) {
+      const msg = String(result.error || '');
+      const noChain =
+        msg.includes('No chain data') ||
+        msg.includes('No chain data available');
+      if (noChain) {
+        return res.status(200).json({
+          status: 'success',
+          data: [],
+          stale: false,
+          message: result.error,
+        });
+      }
       return res.status(500).json(result);
     }
 

@@ -114,6 +114,16 @@ class ApiService {
     return this.request(`/api/fno/ohlcv?underlying=${encodeURIComponent(underlying)}&expiry=${encodeURIComponent(expiry)}&strike=${encodeURIComponent(strike)}&timeframe=${encodeURIComponent(timeframe)}`);
   }
 
+  /** NIFTY / BANKNIFTY / FINNIFTY index OHLC (1m, 1h, 1d) from ClickHouse */
+  async getIndexOhlc(underlying, timeframe = '1h', limit = 8000) {
+    const q = new URLSearchParams({
+      underlying: String(underlying || 'NIFTY').toUpperCase(),
+      timeframe,
+      limit: String(limit),
+    });
+    return this.request(`/api/fno/index-ohlc?${q.toString()}`);
+  }
+
   async getOptionChain(symbol, expiry) {
     if (!symbol || !expiry) throw new Error('Symbol and Expiry are required');
     return this.request(`/api/fno/option-chain/${symbol}/${expiry}`);

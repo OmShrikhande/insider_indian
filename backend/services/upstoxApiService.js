@@ -9,6 +9,47 @@ class UpstoxApiService {
     return this.baseUrl.includes('/v3') ? this.baseUrl.replace('/v3', '/v2') : this.baseUrl;
   }
 
+  /** Upstox v3 historical candles: /historical-candle/{key}/{unit}/{interval}/{to_date}/{from_date} */
+  getV3BaseUrl() {
+    return 'https://api.upstox.com/v3';
+  }
+
+  /**
+   * @param {string} instrumentKey e.g. NSE_INDEX|Nifty 50
+   * @param {'minutes'|'hours'|'days'} unit
+   * @param {number} interval e.g. 1 for 1-minute / 1-hour / 1-day
+   * @param {string} toDate YYYY-MM-DD (inclusive end)
+   * @param {string} fromDate YYYY-MM-DD (inclusive start)
+   */
+  async fetchHistoricalCandlesV3(instrumentKey, unit, interval, toDate, fromDate) {
+    if (!process.env.UPSTOX_ACCESS_TOKEN && !this.accessToken) return [];
+    if (this.isRateLimitedNow()) return [];
+
+    const safeUnit = ['minutes', 'hours', 'days', 'weeks', 'months'].includes(unit) ? unit : 'minutes';
+    const safeInterval = Math.max(1, Math.min(300, Number(interval) || 1));
+    const key = encodeURIComponent(String(instrumentKey).trim());
+    const url = `${this.getV3BaseUrl()}/historical-candle/${key}/${safeUnit}/${safeInterval}/${toDate}/${fromDate}`;
+
+    try {
+      const response = await fetch(url, { headers: this.getHeaders() });
+      if (!response.ok) {
+        const txt = await response.text();
+        if (response.status === 429) {
+          const waitMs = this.extractRetryAfterMs(response, txt);
+          this.markRateLimited(waitMs);
+          console.warn(`[UpstoxAPI] v3 candle rate-limited. Cooling down for ${Math.ceil(waitMs / 1000)}s`);
+        }
+        console.warn(`[UpstoxAPI] v3 Candle fetch failed [${response.status}] for ${instrumentKey} ${safeUnit}/${safeInterval} ${toDate}..${fromDate}`);
+        return [];
+      }
+      const payload = await response.json();
+      return payload?.data?.candles || [];
+    } catch (e) {
+      console.error(`[UpstoxAPI] v3 network error for ${instrumentKey}:`, e.message);
+      return [];
+    }
+  }
+
   getHeaders() {
     const token = process.env.UPSTOX_ACCESS_TOKEN || process.env.UPSTOX_API_KEY || this.accessToken;
     const headers = { 

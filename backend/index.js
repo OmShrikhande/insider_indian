@@ -5,6 +5,7 @@ const { testConnection, client } = require('./config/database');
 const upstoxSyncService = require('./services/upstoxSyncService');
 const marketService = require('./services/marketService');
 const fnoService = require('./services/fnoService');
+const indexOhlcService = require('./services/indexOhlcService');
 
 // Import routes
 const stockRoutes = require('./routes/stocks');
@@ -136,6 +137,20 @@ async function setupDatabase() {
         end_time DateTime,
         updated_at DateTime
       ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY (trading_date, exchange)`,
+      `CREATE TABLE IF NOT EXISTS index_ohlc (
+        underlying_symbol String,
+        instrument_key String,
+        bar_time DateTime,
+        unit String,
+        interval UInt16,
+        open Float64,
+        high Float64,
+        low Float64,
+        close Float64,
+        volume UInt64,
+        open_interest Int64,
+        ingested_at DateTime DEFAULT now()
+      ) ENGINE = ReplacingMergeTree(ingested_at) ORDER BY (underlying_symbol, unit, interval, bar_time)`,
       `CREATE TABLE IF NOT EXISTS fno_option_chain (
         underlying_symbol String,
         underlying_key String DEFAULT '',
@@ -276,6 +291,8 @@ async function setupDatabase() {
 
     // Execute migrations/alters for existing tables
     const migrationQueries = [
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS role String DEFAULT \'analyst\'',
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at DateTime DEFAULT now()',
       'ALTER TABLE stocks_summary ADD COLUMN IF NOT EXISTS sector String DEFAULT \'\'',
       'ALTER TABLE stocks_summary ADD COLUMN IF NOT EXISTS instrument_key String DEFAULT \'\'',
       'ALTER TABLE fno_option_chain ADD COLUMN IF NOT EXISTS underlying_key String DEFAULT \'\'',
@@ -333,6 +350,18 @@ const startServer = async () => {
     fnoService.init().catch((error) => {
       console.error('[FNO] Failed to initialize:', error.message);
     });
+
+    indexOhlcService.maybeBackfillOnStartup();
+
+    const hasUpstox = Boolean(process.env.UPSTOX_ACCESS_TOKEN || process.env.UPSTOX_API_KEY);
+    if (hasUpstox && process.env.INDEX_OHLC_SYNC !== 'false') {
+      setTimeout(() => {
+        indexOhlcService.syncAllRecent().catch((e) => console.warn('[IndexOhlc] startup sync:', e.message));
+      }, 10000);
+      setInterval(() => {
+        indexOhlcService.syncAllRecent().catch((e) => console.warn('[IndexOhlc] hourly sync:', e.message));
+      }, 60 * 60 * 1000);
+    }
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);

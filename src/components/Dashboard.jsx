@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Sidebar from './Sidebar';
 import AuthModal from './AuthModal';
 import authService from '../services/authService';
@@ -24,6 +24,7 @@ const buildDefaultIndicators = () =>
   Object.fromEntries(INDICATORS.map(ind => [ind.id, ind.enabled]));
 
 import OptionChainTable from './OptionChainTable';
+import IndexOhlcChartModal from './IndexOhlcChartModal';
 
 /**
  * Dashboard - Core platform layout.
@@ -42,8 +43,11 @@ const Dashboard = () => {
   const [currentUser, setCurrentUser] = useState(authService.getCurrentUser());
   const [showScreener, setShowScreener] = useState(false);
   const [showOptionChain, setShowOptionChain] = useState(false);
+  const [showIndexChart, setShowIndexChart] = useState(false);
   const [smcData, setSmcData] = useState({ suggestions: [] });
   const [chainRows, setChainRows] = useState([]);
+  const [fnoIndexSpotData, setFnoIndexSpotData] = useState([]);
+  const [fnoIndexSpotLoading, setFnoIndexSpotLoading] = useState(false);
 
   // --- Specialized Hooks ---
   const { data, news, loading, error } = useStockData(selectedSymbol, selectedTimeframe);
@@ -83,6 +87,45 @@ const Dashboard = () => {
 
   const chainTrades = detectChainSMC(chainRows, selectedSymbol, fnoLogic.fnoExpiry);
   const allTrades = [...chainTrades, ...(smcData.suggestions || [])];
+
+  const indexUnderlyingForChart = useMemo(() => {
+    const s = String(selectedSymbol || '').trim();
+    const u = s.toUpperCase();
+    if (['NIFTY', 'BANKNIFTY', 'FINNIFTY'].includes(u)) return u;
+    if (s.includes('Nifty 50') || s.includes('NIFTY 50')) return 'NIFTY';
+    if (s.includes('Nifty Bank')) return 'BANKNIFTY';
+    if (s.includes('Nifty Fin')) return 'FINNIFTY';
+    return null;
+  }, [selectedSymbol]);
+
+  const chainSpotPrice = useMemo(() => {
+    const v = chainRows[0]?.underlying_spot_price;
+    return v != null && !Number.isNaN(Number(v)) ? Number(v) : null;
+  }, [chainRows]);
+
+  useEffect(() => {
+    if (!fnoLogic.isFnoMode || !indexUnderlyingForChart) {
+      setFnoIndexSpotData([]);
+      setFnoIndexSpotLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setFnoIndexSpotLoading(true);
+    (async () => {
+      try {
+        const res = await apiService.getIndexOhlc(indexUnderlyingForChart, selectedTimeframe, 8000);
+        const rows = Array.isArray(res?.data) ? res.data : [];
+        if (!cancelled) setFnoIndexSpotData(rows);
+      } catch {
+        if (!cancelled) setFnoIndexSpotData([]);
+      } finally {
+        if (!cancelled) setFnoIndexSpotLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [fnoLogic.isFnoMode, indexUnderlyingForChart, selectedTimeframe]);
 
   // Global Hotkeys & Listeners
   useEffect(() => {
@@ -135,6 +178,13 @@ const Dashboard = () => {
   return (
     <div className="flex h-screen overflow-hidden elite-dashboard font-mono-elite bg-black">
       {showScreener && <ScreenerPanel onClose={() => setShowScreener(false)} />}
+      {showIndexChart && indexUnderlyingForChart && (
+        <IndexOhlcChartModal
+          underlying={indexUnderlyingForChart}
+          open={showIndexChart}
+          onClose={() => setShowIndexChart(false)}
+        />
+      )}
 
       <Sidebar
         selectedSymbol={selectedSymbol}
@@ -204,7 +254,9 @@ const Dashboard = () => {
                         MIDCPNIFTY: 'NSE_INDEX|Nifty Mid Select',
                       }[String(selectedSymbol || '').toUpperCase()] || `NSE_EQ|${String(selectedSymbol || '').toUpperCase()}`)
                   }
-                  expiry={fnoLogic.fnoExpiry} 
+                  expiry={fnoLogic.fnoExpiry}
+                  spotPrice={chainSpotPrice}
+                  onOpenIndexChart={indexUnderlyingForChart ? () => setShowIndexChart(true) : undefined}
                   onSelectContract={(key) => {
                     // Logic to handle contract selection from chain
                     console.log('Selected contract:', key);
@@ -227,6 +279,8 @@ const Dashboard = () => {
             onInfoClick={(sym) => { setSelectedSymbol(sym); setIsRightSidebarCollapsed(false); }}
             fnoData={fnoData}
             fnoStrike={fnoLogic.fnoStrike}
+            fnoSpotData={fnoIndexSpotData}
+            fnoSpotLoading={fnoIndexSpotLoading}
           />
         </div>
 

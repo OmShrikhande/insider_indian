@@ -18,8 +18,82 @@ const MainChartArea = ({
   showGrid,
   onInfoClick,
   fnoData,
-  fnoStrike
+  fnoStrike,
+  /** Index (NIFTY/BANKNIFTY/FINNIFTY) OHLC for FNO left “spot” pane when equity stream has no bars for that symbol */
+  fnoSpotData = [],
+  fnoSpotLoading = false,
 }) => {
+  const spotSeriesForFno =
+    Array.isArray(fnoSpotData) && fnoSpotData.length > 0 ? fnoSpotData : data;
+
+  // FNO Multi-Chart View (before empty-data gate: index underlyings have no rows in /api/stocks)
+  if (isFnoMode) {
+    return (
+      <div className="absolute inset-0 flex">
+        <div className="w-1/2 h-full border-r border-[#1c2127]">
+          <ChartErrorBoundary>
+            <CandlestickChart
+              data={spotSeriesForFno}
+              news={[]}
+              symbol={`${selectedSymbol} (SPOT)`}
+              timeframe={selectedTimeframe}
+              activeIndicators={activeIndicators}
+              activePatterns={activePatterns}
+              showGrid={showGrid}
+              onInfoClick={onInfoClick}
+            />
+          </ChartErrorBoundary>
+          {!loading && !fnoSpotLoading && spotSeriesForFno.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/50">
+              <span className="text-[10px] text-[#5d606b] font-mono tracking-widest text-center px-4">
+                [ NO_SPOT_BARS — SYNC INDEX_OHLC OR SELECT AN EQUITY ]
+              </span>
+            </div>
+          )}
+          {fnoSpotLoading && (
+            <div className="absolute top-3 left-3 text-[#00f2ff] text-[8px] font-mono animate-pulse z-10">
+              LOADING_INDEX_SPOT...
+            </div>
+          )}
+        </div>
+
+        <div className="w-1/2 h-full flex flex-col">
+          <div className="flex-1 border-b border-[#1c2127] relative">
+            <ChartErrorBoundary>
+              <CandlestickChart
+                data={fnoData.peData}
+                news={[]}
+                symbol={`${selectedSymbol} PE ${fnoStrike}`}
+                timeframe={selectedTimeframe}
+                activeIndicators={activeIndicators}
+                activePatterns={activePatterns}
+                showGrid={showGrid}
+                onInfoClick={onInfoClick}
+              />
+            </ChartErrorBoundary>
+            {fnoData.loading && <div className="absolute top-4 right-4 text-[#ffea00] text-[8px] font-black animate-pulse tracking-widest z-10">SYNCING_PE...</div>}
+          </div>
+
+          <div className="flex-1 relative">
+            <ChartErrorBoundary>
+              <CandlestickChart
+                data={fnoData.ceData}
+                news={[]}
+                symbol={`${selectedSymbol} CE ${fnoStrike}`}
+                timeframe={selectedTimeframe}
+                activeIndicators={activeIndicators}
+                activePatterns={activePatterns}
+                showGrid={showGrid}
+                onInfoClick={onInfoClick}
+              />
+            </ChartErrorBoundary>
+            {fnoData.loading && <div className="absolute top-4 right-4 text-[#ffea00] text-[8px] font-black animate-pulse tracking-widest z-10">SYNCING_CE...</div>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Loading State
   if (loading) {
     return (
@@ -59,64 +133,6 @@ const MainChartArea = ({
              <path d="M3 3v18h18" /><path d="M7 12l5 5 5-5" />
           </svg>
           <span className="text-sm tracking-[0.4em] font-black italic uppercase">[ NO_OHLCV_INTEL_CAPTURED ]</span>
-        </div>
-      </div>
-    );
-  }
-
-  // FNO Multi-Chart View
-  if (isFnoMode) {
-    return (
-      <div className="absolute inset-0 flex">
-        {/* SPOT - LEFT HALF */}
-        <div className="w-1/2 h-full border-r border-[#1c2127]">
-          <ChartErrorBoundary>
-            <CandlestickChart
-              data={data}
-              news={[]}
-              symbol={`${selectedSymbol} (SPOT)`}
-              timeframe={selectedTimeframe}
-              activeIndicators={activeIndicators}
-              activePatterns={activePatterns}
-              showGrid={showGrid}
-              onInfoClick={onInfoClick}
-            />
-          </ChartErrorBoundary>
-        </div>
-        
-        {/* PUT AND CALL - RIGHT HALF */}
-        <div className="w-1/2 h-full flex flex-col">
-          <div className="flex-1 border-b border-[#1c2127] relative">
-            <ChartErrorBoundary>
-              <CandlestickChart
-                data={fnoData.peData}
-                news={[]}
-                symbol={`${selectedSymbol} PE ${fnoStrike}`}
-                timeframe={selectedTimeframe}
-                activeIndicators={activeIndicators}
-                activePatterns={activePatterns}
-                showGrid={showGrid}
-                onInfoClick={onInfoClick}
-              />
-            </ChartErrorBoundary>
-            {fnoData.loading && <div className="absolute top-4 right-4 text-[#ffea00] text-[8px] font-black animate-pulse tracking-widest z-10">SYNCING_PE...</div>}
-          </div>
-          
-          <div className="flex-1 relative">
-            <ChartErrorBoundary>
-              <CandlestickChart
-                data={fnoData.ceData}
-                news={[]}
-                symbol={`${selectedSymbol} CE ${fnoStrike}`}
-                timeframe={selectedTimeframe}
-                activeIndicators={activeIndicators}
-                activePatterns={activePatterns}
-                showGrid={showGrid}
-                onInfoClick={onInfoClick}
-              />
-            </ChartErrorBoundary>
-            {fnoData.loading && <div className="absolute top-4 right-4 text-[#ffea00] text-[8px] font-black animate-pulse tracking-widest z-10">SYNCING_CE...</div>}
-          </div>
         </div>
       </div>
     );
