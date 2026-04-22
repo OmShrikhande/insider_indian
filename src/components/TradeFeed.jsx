@@ -160,6 +160,7 @@ const TradeFeed = ({ trades = [] }) => {
             )}
 
             <div className="mb-3">
+              <div className="text-[8px] text-[#5d606b] uppercase tracking-widest mb-1.5 font-mono">Apply to Chart</div>
               <button
                 type="button"
                 draggable
@@ -168,9 +169,13 @@ const TradeFeed = ({ trades = [] }) => {
                   e.dataTransfer.effectAllowed = 'copyMove';
                 }}
                 onClick={() => focusTradeOnChart(trade)}
-                className="w-full py-2 rounded border border-[#00f2ff]/40 bg-[#00f2ff]/10 text-[#00f2ff] text-[10px] font-black tracking-widest hover:bg-[#00f2ff]/20"
+                className="w-full py-2.5 rounded border border-[#00f2ff]/50 bg-[#00f2ff]/8 text-[#00f2ff] text-[10px] font-black tracking-widest hover:bg-[#00f2ff]/20 hover:border-[#00f2ff]/80 active:scale-95 transition-all flex items-center justify-center gap-2"
               >
-                SHOW_ON_CHART (DRAG_OR_CLICK)
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <path d="M3 9h18M9 21V9"/>
+                </svg>
+                SHOW ON CHART
               </button>
             </div>
 

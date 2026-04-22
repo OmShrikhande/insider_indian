@@ -220,13 +220,17 @@ const Dashboard = () => {
       setFocusedTrade({ ...trade, _focusAt: Date.now() });
     };
 
+    const handleClearTrade = () => setFocusedTrade(null);
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('roxey-info-click', handleInfoClick);
     window.addEventListener('roxey-focus-trade', handleFocusTrade);
+    window.addEventListener('roxey-clear-trade', handleClearTrade);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('roxey-info-click', handleInfoClick);
       window.removeEventListener('roxey-focus-trade', handleFocusTrade);
+      window.removeEventListener('roxey-clear-trade', handleClearTrade);
     };
   }, []);
 

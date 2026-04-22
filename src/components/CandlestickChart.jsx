@@ -853,92 +853,137 @@ const CandlestickChart = ({ data, news, symbol, timeframe, activeIndicators, act
         })()}
 
         {activeFocusedTrade && chartRef.current && (() => {
-          const x = focusedCandle ? getTimeCoordinate(focusedCandle.time) : null;
-          const yTop = focusedCandle ? getPriceCoordinate(focusedCandle.high) : null;
-          const yBottom = focusedCandle ? getPriceCoordinate(focusedCandle.low) : null;
-          
-          const isLong = String(activeFocusedTrade.type).toUpperCase() === 'LONG';
-          const tradeColor = isLong ? '#39ff14' : '#ff003c';
-          const tradeBg = isLong ? 'rgba(57,255,20,0.15)' : 'rgba(255,0,60,0.15)';
+          const W = containerRef.current?.clientWidth || 600;
+          const isLong = String(activeFocusedTrade.type || '').toUpperCase() === 'LONG';
+          const entry  = Number(activeFocusedTrade.entry   || 0);
+          const tp     = Number(activeFocusedTrade.target  || 0);
+          const sl     = Number(activeFocusedTrade.stopLoss || 0);
+          if (!entry) return null;
 
-          const rangeMin = Number(
-            activeFocusedTrade?.range?.min ??
-            activeFocusedTrade?.stopLoss ??
-            (focusedCandle ? Math.min(focusedCandle.open, focusedCandle.close) : 0)
-          );
-          const rangeMax = Number(
-            activeFocusedTrade?.range?.max ??
-            activeFocusedTrade?.target ??
-            (focusedCandle ? Math.max(focusedCandle.open, focusedCandle.close) : 0)
-          );
-          const yRangeTop = getPriceCoordinate(Math.max(rangeMax, rangeMin));
-          const yRangeBottom = getPriceCoordinate(Math.min(rangeMax, rangeMin));
-          const xStart = x != null ? x - 10 : 0;
-          const xEnd = x != null ? x + 350 : (containerRef.current?.clientWidth || 300);
+          const yEntry = entry ? getPriceCoordinate(entry) : null;
+          const yTP    = tp    ? getPriceCoordinate(tp)    : null;
+          const ySL    = sl    ? getPriceCoordinate(sl)    : null;
+          if (yEntry == null) return null;
 
-          const yEntry = activeFocusedTrade.entry ? getPriceCoordinate(activeFocusedTrade.entry) : null;
-          const yTarget = activeFocusedTrade.target ? getPriceCoordinate(activeFocusedTrade.target) : null;
-          const ySL = activeFocusedTrade.stopLoss ? getPriceCoordinate(activeFocusedTrade.stopLoss) : null;
+          // Colors
+          const profitColor = '#26a69a';
+          const profitFill  = isLong ? 'rgba(38,166,154,0.15)' : 'rgba(239,83,80,0.15)';
+          const lossColor   = '#ef5350';
+          const lossFill    = isLong ? 'rgba(239,83,80,0.15)' : 'rgba(38,166,154,0.15)';
+          const entryColor  = '#ffeb3b';
+          const dirColor    = isLong ? '#26a69a' : '#ef5350';
+
+          // Risk/Reward
+          const rr = (tp && sl && entry) ? Math.abs((tp - entry) / (entry - sl)).toFixed(2) : null;
+          const pnlPct = (tp && entry) ? Math.abs(((tp - entry) / entry) * 100).toFixed(2) : null;
+
+          // Label tag width
+          const TAG_W = 98;
+          const TAG_X = W - TAG_W - 2;
 
           return (
             <>
-              {x != null && yTop != null && yBottom != null && (
+              {/* ── Profit Zone (entry → TP) ── */}
+              {yTP != null && (
                 <rect
-                  x={x - 7}
-                  y={Math.min(yTop, yBottom) - 3}
-                  width={14}
-                  height={Math.abs(yTop - yBottom) + 6}
-                  fill="none"
-                  stroke="#00f2ff"
-                  strokeWidth="2"
-                  strokeDasharray="2 2"
+                  x={0} y={Math.min(yEntry, yTP)}
+                  width={W - TAG_W - 4}
+                  height={Math.max(1, Math.abs(yEntry - yTP))}
+                  fill={isLong ? profitFill : lossFill}
                 />
               )}
-              {yRangeTop != null && yRangeBottom != null && (
-                <g>
-                  <rect
-                    x={x != null ? xStart : 0}
-                    y={Math.min(yRangeTop, yRangeBottom)}
-                    width={x != null ? Math.max(100, xEnd - xStart) : (containerRef.current?.clientWidth || 300)}
-                    height={Math.max(2, Math.abs(yRangeTop - yRangeBottom))}
-                    fill={tradeBg}
-                    stroke={tradeColor}
-                    strokeWidth="1.5"
-                    strokeOpacity="0.8"
-                  />
-                  {/* Labels */}
-                  {yTarget != null && (
-                    <text x={(x != null ? xStart : 0) + 10} y={yTarget - 5} fill={tradeColor} fontSize="9" fontWeight="bold" fontFamily="monospace">
-                      TARGET: {activeFocusedTrade.target.toFixed(2)}
-                    </text>
-                  )}
-                  {yEntry != null && (
-                    <text x={(x != null ? xStart : 0) + 10} y={yEntry + 12} fill="#d1d4dc" fontSize="9" fontWeight="bold" fontFamily="monospace">
-                      ENTRY: {activeFocusedTrade.entry.toFixed(2)}
-                    </text>
-                  )}
-                  {ySL != null && (
-                    <text x={(x != null ? xStart : 0) + 10} y={ySL + 12} fill="#ff4d4d" fontSize="9" fontWeight="bold" fontFamily="monospace">
-                      STOP: {activeFocusedTrade.stopLoss.toFixed(2)}
-                    </text>
-                  )}
-                </g>
+              {/* ── Risk Zone (entry → SL) ── */}
+              {ySL != null && (
+                <rect
+                  x={0} y={Math.min(yEntry, ySL)}
+                  width={W - TAG_W - 4}
+                  height={Math.max(1, Math.abs(yEntry - ySL))}
+                  fill={isLong ? lossFill : profitFill}
+                />
               )}
-              <text
-                x={(x != null ? xStart : 0) + 4}
-                y={(yTop != null && yBottom != null) ? Math.min(yTop, yBottom) - 12 : 22}
-                fill="#00f2ff"
-                fontSize="10"
-                fontFamily="'JetBrains Mono', monospace"
-                fontWeight="black"
-                className="uppercase"
-              >
-                {activeFocusedTrade.symbol} | {activeFocusedTrade.type} SIGNAL {x == null ? '(OFF-SCREEN)' : ''}
+
+              {/* ── TP Line ── */}
+              {yTP != null && (
+                <>
+                  <line x1={0} y1={yTP} x2={W - TAG_W - 4} y2={yTP}
+                    stroke={isLong ? profitColor : lossColor} strokeWidth="1.5" strokeDasharray="5 3" />
+                  {/* TP tag */}
+                  <rect x={TAG_X} y={yTP - 10} width={TAG_W} height={20} rx="3"
+                    fill={isLong ? profitColor : lossColor} fillOpacity="0.9" />
+                  <text x={TAG_X + 5} y={yTP + 4} fill="#000" fontSize="9.5" fontWeight="bold" fontFamily="'JetBrains Mono',monospace">
+                    TP  {tp.toFixed(2)}  {pnlPct ? `+${pnlPct}%` : ''}
+                  </text>
+                </>
+              )}
+
+              {/* ── Entry Line ── */}
+              <>
+                <line x1={0} y1={yEntry} x2={W - TAG_W - 4} y2={yEntry}
+                  stroke={entryColor} strokeWidth="2" />
+                {/* Entry tag */}
+                <rect x={TAG_X} y={yEntry - 10} width={TAG_W} height={20} rx="3"
+                  fill={entryColor} fillOpacity="0.95" />
+                <text x={TAG_X + 5} y={yEntry + 4} fill="#000" fontSize="9.5" fontWeight="bold" fontFamily="'JetBrains Mono',monospace">
+                  {isLong ? 'LONG' : 'SHORT'}  {entry.toFixed(2)}
+                </text>
+              </>
+
+              {/* ── SL Line ── */}
+              {ySL != null && (
+                <>
+                  <line x1={0} y1={ySL} x2={W - TAG_W - 4} y2={ySL}
+                    stroke={lossColor} strokeWidth="1.5" strokeDasharray="5 3" />
+                  {/* SL tag */}
+                  <rect x={TAG_X} y={ySL - 10} width={TAG_W} height={20} rx="3"
+                    fill={lossColor} fillOpacity="0.9" />
+                  <text x={TAG_X + 5} y={ySL + 4} fill="#fff" fontSize="9.5" fontWeight="bold" fontFamily="'JetBrains Mono',monospace">
+                    SL  {sl.toFixed(2)}
+                  </text>
+                </>
+              )}
+
+              {/* ── Position badge (top-left) ── */}
+              <rect x={44} y={8} width={220} height={46} rx="5"
+                fill="#0a0a0a" fillOpacity="0.92" stroke={dirColor} strokeWidth="1.2" />
+              {/* Direction pill */}
+              <rect x={50} y={14} width={46} height={16} rx="3"
+                fill={dirColor} fillOpacity="0.9" />
+              <text x={73} y={25.5} fill="#000" fontSize="9" fontWeight="bold"
+                fontFamily="'JetBrains Mono',monospace" textAnchor="middle">
+                {isLong ? 'LONG' : 'SHORT'}
               </text>
+              {/* Symbol */}
+              <text x={102} y={26} fill="#d1d4dc" fontSize="10" fontWeight="bold"
+                fontFamily="'JetBrains Mono',monospace">
+                {String(activeFocusedTrade.symbol || '').toUpperCase()}
+              </text>
+              {/* R:R */}
+              {rr && (
+                <text x={50} y={46} fill="#848e9c" fontSize="8.5"
+                  fontFamily="'JetBrains Mono',monospace">
+                  R:R {rr}  ·  TP {pnlPct}%  ·  SL {sl && entry ? Math.abs(((sl - entry) / entry) * 100).toFixed(2) : '--'}%
+                </text>
+              )}
             </>
           );
         })()}
       </svg>
+
+      {/* Trade Overlay Dismiss Button */}
+      {activeFocusedTrade && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setDroppedTrade(null);
+            window.dispatchEvent(new CustomEvent('roxey-clear-trade'));
+          }}
+          className="absolute z-30 flex items-center gap-1.5 px-2.5 py-1 rounded text-[9px] font-black tracking-widest border border-[#ff4d4d]/40 bg-[#ff4d4d]/10 text-[#ff4d4d] hover:bg-[#ff4d4d]/25 transition-all font-mono"
+          style={{ top: 10, left: 270 }}
+          title="Clear trade overlay"
+        >
+          ✕ CLEAR
+        </button>
+      )}
 
       {/* Ruler Overlay */}
       {isRulerMode && rulerState && (

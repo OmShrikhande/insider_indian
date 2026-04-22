@@ -1,4 +1,4 @@
-import { useState, useEffect, memo, useMemo, useRef } from 'react';
+import { useState, useEffect, memo, useMemo, useRef, useCallback } from 'react';
 import apiService from '../services/apiService';
 
 const SidebarItem = memo(({ s, selectedSymbol, onSymbolChange, inWatchlist, onToggleWatchlist, compact }) => {
@@ -173,8 +173,12 @@ const Sidebar = ({
     fetchTopSymbols();
   }, []);
 
-  const handleSearch = (query) => {
+  const [searchResults, setSearchResults] = useState([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  const handleSearch = useCallback((query) => {
     setSearch(query);
+    setShowDropdown(query.trim().length > 0);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchDebounceRef.current = setTimeout(async () => {
       try {
@@ -193,19 +197,43 @@ const Sidebar = ({
               in_hourly: 1,
               in_daily: 1,
             })));
+            setSearchResults(uniq.slice(0, 8).map(s => ({ symbol: s })));
           }
         } else {
           const response = await apiService.searchSymbols(query || '');
           if (response) {
             const data = Array.isArray(response) ? response : (response.data || []);
             setSymbols(data);
+            setSearchResults((data || []).slice(0, 8));
           }
         }
       } catch (err) {
         console.error('Sidebar search failed:', err);
       }
-    }, 300);
-  };
+    }, 250);
+  }, [viewMode]);
+
+  const handleSearchSelect = useCallback((symbol) => {
+    onSymbolChange(symbol);
+    setSearch('');
+    setShowDropdown(false);
+    setSearchResults([]);
+  }, [onSymbolChange]);
+
+  const handleSearchKeyDown = useCallback((e) => {
+    if (e.key === 'Enter') {
+      const first = searchResults[0];
+      if (first) {
+        handleSearchSelect(first.symbol);
+      } else if (search.trim()) {
+        handleSearchSelect(search.trim().toUpperCase());
+      }
+    }
+    if (e.key === 'Escape') {
+      setShowDropdown(false);
+      setSearch('');
+    }
+  }, [searchResults, search, handleSearchSelect]);
 
   const symbolMap = useMemo(() => new Map(symbols.map((item) => [item.symbol, item])), [symbols]);
   const displayedSymbols = useMemo(() => {
@@ -255,10 +283,34 @@ const Sidebar = ({
                 placeholder="TYPE SYMBOL_ (/)"
                 value={search}
                 onChange={(e) => handleSearch(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                onFocus={() => search.trim() && setShowDropdown(true)}
+                onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
                 className="w-full bg-[#0a0a0a] border border-[#1c2127] rounded-lg px-3 py-2.5 text-xs text-[#d1d4dc] focus:outline-none focus:border-[#00f2ff] font-mono transition-all placeholder:text-[#333] elite-card"
                 id="symbol-search-input"
                 autoComplete="off"
               />
+              {showDropdown && searchResults.length > 0 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-[#0a0a0a] border border-[#00f2ff]/30 rounded-lg overflow-hidden z-50 shadow-lg shadow-black/80">
+                  {searchResults.map((item) => (
+                    <button
+                      key={item.symbol}
+                      type="button"
+                      onMouseDown={() => handleSearchSelect(item.symbol)}
+                      className="w-full text-left px-3 py-2 text-xs font-mono text-[#d1d4dc] hover:bg-[#00f2ff]/10 hover:text-[#00f2ff] flex items-center gap-2 border-b border-[#1c2127] last:border-b-0 transition-all"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#00f2ff]/50 flex-shrink-0"></span>
+                      <span className="font-bold">{item.symbol}</span>
+                      {item.in_hourly || item.in_daily ? (
+                        <span className="ml-auto text-[8px] text-[#39ff14] opacity-70">REC</span>
+                      ) : null}
+                    </button>
+                  ))}
+                  <div className="px-3 py-1.5 text-[8px] text-[#5d606b] font-mono border-t border-[#1c2127] flex items-center gap-1">
+                    <span className="text-[#00f2ff]">[ENTER]</span> to select first · <span className="text-[#848e9c]">{searchResults.length} results</span>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <button
